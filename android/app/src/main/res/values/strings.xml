@@ -1,0 +1,4 @@
+﻿<resources>
+    <!-- The \u0030 tells Android to definitely treat this as a string, preventing auth crash -->
+    <string name="app_id">\u003280328504204</string>
+</resources>

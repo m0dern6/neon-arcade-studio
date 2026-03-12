@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>280328504204-ovu1bpnv89tvr7719gbu3vvs0emor925.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.280328504204-ovu1bpnv89tvr7719gbu3vvs0emor925</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>280328504204-vlnugf0srqrbsl0djo1tsb9ulri1tgc8.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDqmb0UP7L2bHJpa-tJzHV0AcRoKnLOzNg</string>
+	<key>GCM_SENDER_ID</key>
+	<string>280328504204</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.neon.arcade.studio</string>
+	<key>PROJECT_ID</key>
+	<string>neon-studio-game</string>
+	<key>STORAGE_BUCKET</key>
+	<string>neon-studio-game.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:280328504204:ios:ff45d3381b501f4e0c8ca9</string>
+</dict>
+</plist>
