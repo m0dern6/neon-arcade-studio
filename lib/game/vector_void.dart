@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
@@ -28,14 +29,24 @@ class _VectorVoidGameState extends State<VectorVoidGame>
   DateTime? lastSpawnTime;
 
   final Random random = Random();
+  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
+    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..addListener(_update);
+  }
+
+  void _cycleGraphics() {
+    setState(() {
+      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
+      _graphicsQuality = GraphicsQuality.values[next];
+      SettingsManager().setGraphicsQuality(_graphicsQuality);
+    });
   }
 
   void _startGame() {
@@ -200,6 +211,7 @@ class _VectorVoidGameState extends State<VectorVoidGame>
                   playerPos: playerPos,
                   enemies: enemies,
                   isGameOver: isGameOver,
+                  graphicsQuality: _graphicsQuality,
                 ),
                 size: Size.infinite,
               ),
@@ -323,8 +335,10 @@ class _VectorVoidGameState extends State<VectorVoidGame>
                       AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
                     });
                   },
+                  onToggleGraphics: _cycleGraphics,
                   isMusicEnabled: AudioManager().isMusicEnabled,
                   isSfxEnabled: AudioManager().isSfxEnabled,
+                  graphicsQuality: _graphicsQuality,
                 ),
             ],
           ),
@@ -369,19 +383,39 @@ class VoidPainter extends CustomPainter {
   final Offset playerPos;
   final List<VoidEnemy> enemies;
   final bool isGameOver;
+  final GraphicsQuality graphicsQuality;
 
   VoidPainter({
     required this.playerPos,
     required this.enemies,
     required this.isGameOver,
+    required this.graphicsQuality,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     // Player
     final playerPaint = Paint()
-      ..color = isGameOver ? Colors.red : Colors.greenAccent
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      ..color = isGameOver ? Colors.red : Colors.greenAccent;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      playerPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 15 : 10,
+      );
+    }
+
+    if (graphicsQuality == GraphicsQuality.high) {
+      canvas.drawCircle(
+        playerPos,
+        18,
+        Paint()
+          ..color = (isGameOver ? Colors.red : Colors.greenAccent).withAlpha(
+            100,
+          )
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 25),
+      );
+    }
 
     canvas.drawCircle(playerPos, 15, playerPaint);
     canvas.drawCircle(playerPos, 8, Paint()..color = Colors.white);
@@ -390,8 +424,14 @@ class VoidPainter extends CustomPainter {
     final enemyPaint = Paint()
       ..color = Colors.greenAccent.withAlpha(150)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+      ..strokeWidth = 2;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      enemyPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 8 : 3,
+      );
+    }
 
     for (var enemy in enemies) {
       Path path = Path();
@@ -399,6 +439,18 @@ class VoidPainter extends CustomPainter {
       path.lineTo(enemy.pos.dx + 8, enemy.pos.dy + 8);
       path.lineTo(enemy.pos.dx - 8, enemy.pos.dy + 8);
       path.close();
+
+      if (graphicsQuality == GraphicsQuality.high) {
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.greenAccent.withAlpha(50)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 6
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+        );
+      }
+
       canvas.drawPath(path, enemyPaint);
       canvas.drawPath(
         path,

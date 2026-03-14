@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
@@ -30,14 +31,24 @@ class _NeonGravityGameState extends State<NeonGravityGame>
   DateTime? lastObstacleTime;
 
   final Random random = Random();
+  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
+    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..addListener(_update);
+  }
+
+  void _cycleGraphics() {
+    setState(() {
+      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
+      _graphicsQuality = GraphicsQuality.values[next];
+      SettingsManager().setGraphicsQuality(_graphicsQuality);
+    });
   }
 
   void _startGame() {
@@ -194,6 +205,7 @@ class _NeonGravityGameState extends State<NeonGravityGame>
                   playerX: playerX,
                   obstacles: obstacles,
                   score: score,
+                  graphicsQuality: _graphicsQuality,
                 ),
                 size: Size.infinite,
               ),
@@ -317,8 +329,10 @@ class _NeonGravityGameState extends State<NeonGravityGame>
                       AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
                     });
                   },
+                  onToggleGraphics: _cycleGraphics,
                   isMusicEnabled: AudioManager().isMusicEnabled,
                   isSfxEnabled: AudioManager().isSfxEnabled,
+                  graphicsQuality: _graphicsQuality,
                 ),
             ],
           ),
@@ -339,12 +353,14 @@ class NeonPainter extends CustomPainter {
   final double playerX;
   final List<Obstacle> obstacles;
   final int score;
+  final GraphicsQuality graphicsQuality;
 
   NeonPainter({
     required this.playerY,
     required this.playerX,
     required this.obstacles,
     required this.score,
+    required this.graphicsQuality,
   });
 
   @override
@@ -356,8 +372,32 @@ class NeonPainter extends CustomPainter {
     final lanePaint = Paint()
       ..color = Colors.cyan.withAlpha(100)
       ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+      ..style = PaintingStyle.stroke;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      lanePaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 8 : 3,
+      );
+      if (graphicsQuality == GraphicsQuality.high) {
+        canvas.drawLine(
+          Offset(0, centerY - laneOffset - 20),
+          Offset(size.width, centerY - laneOffset - 20),
+          Paint()
+            ..color = Colors.cyan.withAlpha(50)
+            ..strokeWidth = 8
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+        );
+        canvas.drawLine(
+          Offset(0, centerY + laneOffset + 20),
+          Offset(size.width, centerY + laneOffset + 20),
+          Paint()
+            ..color = Colors.cyan.withAlpha(50)
+            ..strokeWidth = 8
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+        );
+      }
+    }
 
     canvas.drawLine(
       Offset(0, centerY - laneOffset - 20),
@@ -373,8 +413,14 @@ class NeonPainter extends CustomPainter {
     // Draw Obstacles
     final obsPaint = Paint()
       ..color = Colors.redAccent
-      ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      ..style = PaintingStyle.fill;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      obsPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 10 : 5,
+      );
+    }
 
     for (var obs in obstacles) {
       final oY = centerY + (obs.isTop ? -laneOffset - 20 : laneOffset + 20);
@@ -392,20 +438,37 @@ class NeonPainter extends CustomPainter {
       canvas.drawPath(path, obsPaint);
 
       // Glow for obstacles
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = Colors.red.withAlpha(150)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2,
-      );
+      Paint borderPaint = Paint()
+        ..color = Colors.red.withAlpha(150)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+
+      if (graphicsQuality == GraphicsQuality.high) {
+        borderPaint.strokeWidth = 4;
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.red.withAlpha(80)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 8
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+        );
+      }
+
+      canvas.drawPath(path, borderPaint);
     }
 
     // Draw Player
     final playerPaint = Paint()
       ..color = Colors.cyanAccent
-      ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      ..style = PaintingStyle.fill;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      playerPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 12 : 8,
+      );
+    }
 
     final pY = centerY + (playerY * laneOffset);
     final playerRect = Rect.fromCenter(
@@ -415,6 +478,19 @@ class NeonPainter extends CustomPainter {
     );
 
     // Outer Glow
+    if (graphicsQuality == GraphicsQuality.high) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          playerRect.inflate(2),
+          const Radius.circular(5),
+        ),
+        Paint()
+          ..color = Colors.cyanAccent.withAlpha(100)
+          ..style = PaintingStyle.fill
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
+      );
+    }
+
     canvas.drawRRect(
       RRect.fromRectAndRadius(playerRect, const Radius.circular(5)),
       playerPaint,

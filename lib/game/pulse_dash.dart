@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
@@ -28,14 +29,24 @@ class _PulseDashGameState extends State<PulseDashGame>
   int nodesHit = 0; // Added for difficulty scaling
 
   final Random random = Random();
+  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
+    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..addListener(_update);
+  }
+
+  void _cycleGraphics() {
+    setState(() {
+      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
+      _graphicsQuality = GraphicsQuality.values[next];
+      SettingsManager().setGraphicsQuality(_graphicsQuality);
+    });
   }
 
   void _startGame() {
@@ -163,7 +174,10 @@ class _PulseDashGameState extends State<PulseDashGame>
             children: [
               // Background Visualizer (Subtle)
               CustomPaint(
-                painter: PulsePainter(nodes: nodes),
+                painter: PulsePainter(
+                  nodes: nodes,
+                  graphicsQuality: _graphicsQuality,
+                ),
                 size: Size.infinite,
               ),
 
@@ -286,8 +300,10 @@ class _PulseDashGameState extends State<PulseDashGame>
                       AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
                     });
                   },
+                  onToggleGraphics: _cycleGraphics,
                   isMusicEnabled: AudioManager().isMusicEnabled,
                   isSfxEnabled: AudioManager().isSfxEnabled,
+                  graphicsQuality: _graphicsQuality,
                 ),
             ],
           ),
@@ -306,8 +322,9 @@ class PulseNode {
 
 class PulsePainter extends CustomPainter {
   final List<PulseNode> nodes;
+  final GraphicsQuality graphicsQuality;
 
-  PulsePainter({required this.nodes});
+  PulsePainter({required this.nodes, required this.graphicsQuality});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -319,13 +336,28 @@ class PulsePainter extends CustomPainter {
         ..strokeWidth = 2;
       canvas.drawCircle(node.position, 40, ringPaint);
 
-      // Inner Pulsing Circle
       final pulsePaint = Paint()
         ..color = node.progress < 0.8
             ? Colors.yellowAccent.withAlpha(100)
             : (node.progress > 1.0 ? Colors.redAccent : Colors.cyanAccent)
-        ..style = PaintingStyle.fill
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+        ..style = PaintingStyle.fill;
+
+      if (graphicsQuality != GraphicsQuality.low) {
+        pulsePaint.maskFilter = MaskFilter.blur(
+          BlurStyle.normal,
+          graphicsQuality == GraphicsQuality.high ? 12 : 8,
+        );
+        if (graphicsQuality == GraphicsQuality.high) {
+          canvas.drawCircle(
+            node.position,
+            node.progress * 40 + 5,
+            Paint()
+              ..color = pulsePaint.color.withAlpha(50)
+              ..style = PaintingStyle.fill
+              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
+          );
+        }
+      }
 
       double radius = node.progress * 40;
       canvas.drawCircle(node.position, radius, pulsePaint);

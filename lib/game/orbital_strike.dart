@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
@@ -30,14 +31,24 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
   DateTime? lastSpawnTime;
 
   final Random random = Random();
+  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
+    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
     )..addListener(_update);
+  }
+
+  void _cycleGraphics() {
+    setState(() {
+      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
+      _graphicsQuality = GraphicsQuality.values[next];
+      SettingsManager().setGraphicsQuality(_graphicsQuality);
+    });
   }
 
   void _startGame() {
@@ -187,6 +198,7 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
                   shieldWidth: shieldWidth,
                   enemies: enemies,
                   isGameOver: isGameOver,
+                  graphicsQuality: _graphicsQuality,
                 ),
                 size: Size.infinite,
               ),
@@ -307,8 +319,10 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
                       AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
                     });
                   },
+                  onToggleGraphics: _cycleGraphics,
                   isMusicEnabled: AudioManager().isMusicEnabled,
                   isSfxEnabled: AudioManager().isSfxEnabled,
+                  graphicsQuality: _graphicsQuality,
                 ),
             ],
           ),
@@ -329,12 +343,14 @@ class OrbitalPainter extends CustomPainter {
   final double shieldWidth;
   final List<Enemy> enemies;
   final bool isGameOver;
+  final GraphicsQuality graphicsQuality;
 
   OrbitalPainter({
     required this.shieldAngle,
     required this.shieldWidth,
     required this.enemies,
     required this.isGameOver,
+    required this.graphicsQuality,
   });
 
   @override
@@ -353,8 +369,24 @@ class OrbitalPainter extends CustomPainter {
 
     // Draw Core
     final corePaint = Paint()
-      ..color = isGameOver ? Colors.red : Colors.pinkAccent
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      ..color = isGameOver ? Colors.red : Colors.pinkAccent;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      corePaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 15 : 10,
+      );
+      if (graphicsQuality == GraphicsQuality.high) {
+        canvas.drawCircle(
+          center,
+          30,
+          Paint()
+            ..color = (isGameOver ? Colors.red : Colors.pink).withAlpha(100)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
+        );
+      }
+    }
+
     canvas.drawCircle(center, 25, corePaint);
     canvas.drawCircle(center, 15, Paint()..color = Colors.white);
 
@@ -363,8 +395,29 @@ class OrbitalPainter extends CustomPainter {
       ..color = Colors.cyanAccent
       ..style = PaintingStyle.stroke
       ..strokeWidth = 6
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      ..strokeCap = StrokeCap.round;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      shieldPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 8 : 5,
+      );
+      if (graphicsQuality == GraphicsQuality.high) {
+        // extra shield glow
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: 45),
+          shieldAngle - shieldWidth / 2,
+          shieldWidth,
+          false,
+          Paint()
+            ..color = Colors.cyanAccent.withAlpha(100)
+            ..strokeWidth = 12
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+        );
+      }
+    }
 
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: 45),
@@ -388,9 +441,13 @@ class OrbitalPainter extends CustomPainter {
     );
 
     // Draw Enemies
-    final enemyPaint = Paint()
-      ..color = Colors.amberAccent
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    final enemyPaint = Paint()..color = Colors.amberAccent;
+    if (graphicsQuality != GraphicsQuality.low) {
+      enemyPaint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 6 : 4,
+      );
+    }
 
     for (var enemy in enemies) {
       double ex = center.dx + cos(enemy.angle) * enemy.distance;

@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
@@ -30,15 +31,25 @@ class _CyberStackGameState extends State<CyberStackGame>
 
   double speed = 3.0;
   final Random random = Random();
+  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
+    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..addListener(_update);
     _resetGame();
+  }
+
+  void _cycleGraphics() {
+    setState(() {
+      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
+      _graphicsQuality = GraphicsQuality.values[next];
+      SettingsManager().setGraphicsQuality(_graphicsQuality);
+    });
   }
 
   void _resetGame() {
@@ -162,6 +173,7 @@ class _CyberStackGameState extends State<CyberStackGame>
                   currentX: currentBlockX,
                   currentWidth: blockWidth,
                   isStarted: isStarted,
+                  graphicsQuality: _graphicsQuality,
                 ),
                 size: Size.infinite,
               ),
@@ -285,8 +297,10 @@ class _CyberStackGameState extends State<CyberStackGame>
                       AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
                     });
                   },
+                  onToggleGraphics: _cycleGraphics,
                   isMusicEnabled: AudioManager().isMusicEnabled,
                   isSfxEnabled: AudioManager().isSfxEnabled,
+                  graphicsQuality: _graphicsQuality,
                 ),
             ],
           ),
@@ -312,12 +326,14 @@ class StackPainter extends CustomPainter {
   final double currentX;
   final double currentWidth;
   final bool isStarted;
+  final GraphicsQuality graphicsQuality;
 
   StackPainter({
     required this.stack,
     required this.currentX,
     required this.currentWidth,
     required this.isStarted,
+    required this.graphicsQuality,
   });
 
   @override
@@ -356,8 +372,23 @@ class StackPainter extends CustomPainter {
   void _drawNeonBlock(Canvas canvas, Rect rect, Color color, double opacity) {
     final paint = Paint()
       ..color = color.withAlpha((opacity * 255).toInt())
-      ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      ..style = PaintingStyle.fill;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      paint.maskFilter = MaskFilter.blur(
+        BlurStyle.normal,
+        graphicsQuality == GraphicsQuality.high ? 10 : 5,
+      );
+
+      if (graphicsQuality == GraphicsQuality.high) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect.inflate(2), const Radius.circular(6)),
+          Paint()
+            ..color = color.withAlpha(50)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
+        );
+      }
+    }
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(4)),
