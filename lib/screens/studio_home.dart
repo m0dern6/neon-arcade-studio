@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,13 +23,42 @@ class StudioHomeScreen extends StatefulWidget {
 
 class _StudioHomeScreenState extends State<StudioHomeScreen> {
   final AuthService _authService = AuthService();
-  Map<String, int> bestScores = {};
+  Map<String, int> localBestScores = {};
+  StreamSubscription<User?>? _authSubscription;
 
   @override
   void initState() {
     super.initState();
-    AudioManager().playMusic('background.mp3');
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      _loadUserScores(user);
+    });
     _autoSignIn(); // Call auto sign-in when the widget initializes
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUserScores(User? user) async {
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          localBestScores = {};
+        });
+      }
+      return;
+    }
+
+    final db = DatabaseService(uid: user.uid);
+    await db.syncPendingScores();
+    final cached = await db.getCachedBestScores();
+    if (mounted) {
+      setState(() {
+        localBestScores = cached;
+      });
+    }
   }
 
   void _autoSignIn() async {
@@ -36,6 +67,187 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
     } catch (e) {
       print("Auto sign-in failed: $e");
     }
+  }
+
+  Future<void> _handleSignOut() async {
+    bool isCanceled = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withAlpha(200),
+      builder: (context) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Colors.cyanAccent),
+              const SizedBox(height: 24),
+              const Text(
+                'SIGNING OUT...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  decoration: TextDecoration.none,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Tap anywhere or press back to cancel',
+                style: TextStyle(
+                  color: Colors.white.withAlpha(150),
+                  fontSize: 12,
+                  decoration: TextDecoration.none,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      isCanceled = true;
+    });
+
+    try {
+      // 1.5 second delay to give user time to cancel
+      await Future.delayed(const Duration(milliseconds: 1500));
+
+      if (!isCanceled) {
+        await _authService.signOut();
+        if (mounted) {
+          Navigator.of(context).pop(); // Close the dialog
+        }
+      }
+    } catch (e) {
+      if (!isCanceled && mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  Map<String, int> _mergeBestScores(
+    Map<String, int> local,
+    Map<String, int> remote,
+  ) {
+    final merged = <String, int>{...local};
+    for (final entry in remote.entries) {
+      final current = merged[entry.key] ?? 0;
+      merged[entry.key] = entry.value > current ? entry.value : current;
+    }
+    return merged;
+  }
+
+  void _showLeaderboard(BuildContext context, GameMetadata game) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF13133A),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(game.icon, color: game.themeColor),
+                    const SizedBox(width: 10),
+                    Text(
+                      '${game.title} Leaderboard',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: DatabaseService.leaderboardStream(game.id),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      final docs = snapshot.data?.docs ?? [];
+                      if (docs.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            'No scores yet',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        itemCount: docs.length,
+                        itemBuilder: (context, index) {
+                          final row = docs[index].data();
+                          final name =
+                              (row['displayName'] as String?) ?? 'Player';
+                          final score = (row[game.id] as int?) ?? 0;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withAlpha(14),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 34,
+                                  child: Text(
+                                    '#${index + 1}',
+                                    style: TextStyle(
+                                      color: game.themeColor,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                                Text(
+                                  '$score',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildProfileHeader(User? user) {
@@ -70,7 +282,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => _authService.signOut(),
+                  onTap: _handleSignOut,
                   child: Text(
                     'SIGN OUT',
                     style: TextStyle(
@@ -108,12 +320,20 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
               ? DatabaseService(uid: user.uid).userData
               : const Stream.empty(),
           builder: (context, scoreSnapshot) {
+            final remoteBestScores = <String, int>{};
             if (scoreSnapshot.hasData && scoreSnapshot.data!.exists) {
               final data = scoreSnapshot.data!.data() as Map<String, dynamic>;
-              bestScores = data.map(
-                (key, value) => MapEntry(key, value is int ? value : 0),
-              );
+              for (final entry in data.entries) {
+                if (entry.value is num) {
+                  remoteBestScores[entry.key] = (entry.value as num).toInt();
+                }
+              }
             }
+
+            final bestScores = _mergeBestScores(
+              localBestScores,
+              remoteBestScores,
+            );
 
             final List<GameMetadata> games = [
               GameMetadata(
@@ -241,20 +461,30 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                           horizontal: 24,
                           vertical: 10,
                         ),
-                        sliver: SliverList(
+                        sliver: SliverGrid(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 20,
+                                crossAxisSpacing: 20,
+                                childAspectRatio: 0.8,
+                              ),
                           delegate: SliverChildBuilderDelegate((
                             context,
                             index,
                           ) {
                             final game = games[index];
                             final best = bestScores[game.id] ?? 0;
-                            return Padding(
-                                  padding: const EdgeInsets.only(bottom: 20),
-                                  child: GameCard(game: game, bestScore: best),
+                            return GameCard(
+                                  game: game,
+                                  bestScore: best,
+                                  onLeaderboardTap: () {
+                                    _showLeaderboard(context, game);
+                                  },
                                 )
                                 .animate(delay: (100 * index).ms)
                                 .fadeIn(duration: 500.ms)
-                                .slideY(begin: 0.2, curve: Curves.easeOutQuad);
+                                .scaleXY(begin: 0.8, curve: Curves.easeOutBack);
                           }, childCount: games.length),
                         ),
                       ),
@@ -289,8 +519,14 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
 class GameCard extends StatelessWidget {
   final GameMetadata game;
   final int bestScore;
+  final VoidCallback onLeaderboardTap;
 
-  const GameCard({super.key, required this.game, required this.bestScore});
+  const GameCard({
+    super.key,
+    required this.game,
+    required this.bestScore,
+    required this.onLeaderboardTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -302,40 +538,65 @@ class GameCard extends StatelessWidget {
         );
       },
       child: Container(
-        height: 160,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          color: Colors.white.withAlpha(10),
-          border: Border.all(color: Colors.white.withAlpha(20), width: 1),
+          borderRadius: BorderRadius.circular(20),
+          color: Colors.black.withAlpha(80),
+          border: Border.all(color: game.themeColor.withAlpha(120), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: game.themeColor.withAlpha(50),
+              blurRadius: 15,
+              spreadRadius: 2,
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
           children: [
+            // Background neon glow
             Positioned(
               right: -30,
-              top: -30,
+              bottom: -30,
               child: Container(
-                width: 150,
-                height: 150,
+                width: 120,
+                height: 120,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: game.themeColor.withAlpha(40),
+                  color: game.themeColor.withAlpha(30),
+                  boxShadow: [
+                    BoxShadow(
+                      color: game.themeColor.withAlpha(60),
+                      blurRadius: 40,
+                      spreadRadius: 10,
+                    ),
+                  ],
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: game.themeColor.withAlpha(30),
-                          borderRadius: BorderRadius.circular(16),
+                          color: game.themeColor.withAlpha(20),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: game.themeColor.withAlpha(100),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: game.themeColor.withAlpha(40),
+                              blurRadius: 10,
+                            ),
+                          ],
                         ),
                         child: Icon(
                           game.icon,
@@ -343,37 +604,71 @@ class GameCard extends StatelessWidget {
                           size: 28,
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            game.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
+                      IconButton(
+                        onPressed: onLeaderboardTap,
+                        icon: Icon(
+                          Icons.emoji_events,
+                          color: game.themeColor,
+                          size: 24,
+                        ),
+                        style: IconButton.styleFrom(
+                          backgroundColor: game.themeColor.withAlpha(20),
+                          minimumSize: const Size(40, 40),
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(
+                              color: game.themeColor.withAlpha(50),
                             ),
                           ),
-                          Text(
-                            'BEST: $bestScore',
-                            style: TextStyle(
-                              color: game.themeColor.withAlpha(200),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
-                  Text(
-                    game.description,
-                    style: TextStyle(
-                      color: Colors.white.withAlpha(150),
-                      fontSize: 12,
-                      height: 1.4,
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          game.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                            shadows: [
+                              Shadow(color: game.themeColor, blurRadius: 10),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: game.themeColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: game.themeColor.withAlpha(50),
+                            ),
+                          ),
+                          child: Text(
+                            'BEST: $bestScore',
+                            style: TextStyle(
+                              color: game.themeColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
