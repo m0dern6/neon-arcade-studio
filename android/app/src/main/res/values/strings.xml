@@ -1,4 +1,7 @@
 ﻿<resources>
-    <!-- The \u0030 tells Android to definitely treat this as a string, preventing auth crash -->
+    <!-- The Play Games App ID (12-digit number from Play Console). Escaped to prevent integer crash. -->
     <string name="app_id">\u003280328504204</string>
+    
+    <!-- The Web Client ID for Firebase Auth -->
+    <string name="default_web_client_id">280328504204-i08tpigvu33a05jevdnocrauvbrovupg.apps.googleusercontent.com</string>
 </resources>

@@ -1,1 +1,31 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"neon-studio-game","appId":"1:280328504204:android:10f02721ea8f2f930c8ca9","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"neon-studio-game","configurations":{"android":"1:280328504204:android:10f02721ea8f2f930c8ca9","ios":"1:280328504204:ios:ff45d3381b501f4e0c8ca9"}}}}}}
+{
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "neon-studio-game",
+          "appId": "1:280328504204:android:e798fe44b55f0f440c8ca9",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "neon-studio-game",
+          "configurations": {
+            "android": "1:280328504204:android:e798fe44b55f0f440c8ca9",
+            "ios": "1:280328504204:ios:ff45d3381b501f4e0c8ca9",
+            "web": "1:280328504204:web:2af1b86f1e1a5d560c8ca9"
+          }
+        }
+      }
+    }
+  }
+}
