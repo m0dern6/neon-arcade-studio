@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import '../services/settings_manager.dart';
 
 class PauseOverlay extends StatelessWidget {
   final VoidCallback onResume;
   final VoidCallback onHome;
   final VoidCallback onToggleMusic;
   final VoidCallback onToggleSfx;
+  final VoidCallback onToggleGraphics;
   final bool isMusicEnabled;
   final bool isSfxEnabled;
+  final GraphicsQuality graphicsQuality;
 
   const PauseOverlay({
     super.key,
@@ -14,8 +17,10 @@ class PauseOverlay extends StatelessWidget {
     required this.onHome,
     required this.onToggleMusic,
     required this.onToggleSfx,
+    required this.onToggleGraphics,
     required this.isMusicEnabled,
     required this.isSfxEnabled,
+    required this.graphicsQuality,
   });
 
   @override
@@ -69,6 +74,13 @@ class PauseOverlay extends StatelessWidget {
                 icon: isSfxEnabled ? Icons.volume_up : Icons.volume_off,
                 color: Colors.purpleAccent,
                 onPressed: onToggleSfx,
+              ),
+              const SizedBox(height: 16),
+              _MenuButton(
+                label: 'GFX: ${graphicsQuality.name.toUpperCase()}',
+                icon: Icons.hd,
+                color: Colors.orangeAccent,
+                onPressed: onToggleGraphics,
               ),
               const SizedBox(height: 16),
               _MenuButton(
