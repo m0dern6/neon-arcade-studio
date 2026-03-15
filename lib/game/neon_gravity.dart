@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
 class NeonGravityGame extends StatefulWidget {
-  const NeonGravityGame({super.key});
+  final String? uid;
+  const NeonGravityGame({super.key, this.uid});
 
   @override
   State<NeonGravityGame> createState() => _NeonGravityGameState();
@@ -25,6 +25,7 @@ class _NeonGravityGameState extends State<NeonGravityGame>
   bool isGameOver = false;
   bool isStarted = false;
   bool isPaused = false;
+  List<Offset> trail = []; // Player trail
 
   List<Obstacle> obstacles = [];
   double speed = 5.0;
@@ -72,6 +73,13 @@ class _NeonGravityGameState extends State<NeonGravityGame>
     setState(() {
       // Smooth player movement
       playerY += (playerTargetY - playerY) * 0.15;
+
+      // Update trail
+      final screenHeight = MediaQuery.of(context).size.height;
+      final laneOffset = 80.0;
+      final pY = (screenHeight / 2) + (playerY * laneOffset);
+      trail.insert(0, Offset(playerX, pY));
+      if (trail.length > 15) trail.removeLast();
 
       // Move obstacles
       int level = (score / 10).floor();
@@ -152,11 +160,8 @@ class _NeonGravityGameState extends State<NeonGravityGame>
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
 
-    // Persist score to Firebase if user is logged in
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      DatabaseService(uid: user.uid).updateScore('neon_gravity', score);
-    }
+    // Persist score to Firebase or locally
+    DatabaseService(uid: widget.uid).updateScore('neon_gravity', score);
   }
 
   void _onTap() {
@@ -206,6 +211,7 @@ class _NeonGravityGameState extends State<NeonGravityGame>
                   obstacles: obstacles,
                   score: score,
                   graphicsQuality: _graphicsQuality,
+                  trail: trail,
                 ),
                 size: Size.infinite,
               ),
@@ -233,51 +239,59 @@ class _NeonGravityGameState extends State<NeonGravityGame>
               if (!isStarted || isGameOver)
                 Center(
                   child: Container(
-                    padding: const EdgeInsets.all(30),
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 30),
                     decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(180),
-                      borderRadius: BorderRadius.circular(20),
+                      color: const Color(0xFF0D0D2B).withAlpha(220),
+                      borderRadius: BorderRadius.circular(24),
                       border: Border.all(
-                        color: Colors.cyan.withAlpha(100),
+                        color: (isGameOver ? Colors.redAccent : Colors.cyanAccent).withAlpha(150),
                         width: 2,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.cyan.withAlpha(50),
-                          blurRadius: 20,
-                          spreadRadius: 5,
+                          color: (isGameOver ? Colors.redAccent : Colors.cyanAccent).withAlpha(40),
+                          blurRadius: 30,
+                          spreadRadius: 2,
                         ),
                       ],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        Icon(
+                          isGameOver ? Icons.error_outline : Icons.bolt,
+                          color: isGameOver ? Colors.redAccent : Colors.cyanAccent,
+                          size: 48,
+                        ),
+                        const SizedBox(height: 16),
                         Text(
-                          isGameOver ? 'GAME OVER' : 'NEON GRAVITY',
+                          isGameOver ? 'SYSTEM FAILURE' : 'NEON GRAVITY',
                           style: TextStyle(
-                            color: isGameOver
-                                ? Colors.redAccent
-                                : Colors.cyanAccent,
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 4,
+                            color: isGameOver ? Colors.redAccent : Colors.cyanAccent,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2,
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        if (isGameOver)
+                        if (isGameOver) ...[
+                          const SizedBox(height: 8),
                           Text(
                             'Score: $score',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 24,
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                        const SizedBox(height: 20),
+                        ],
+                        const SizedBox(height: 24),
                         Text(
-                          'TAP TO ${isGameOver ? 'RESTART' : 'START'}',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
+                          'TAP TO ${isGameOver ? 'RETRY' : 'INITIALIZE'}',
+                          style: TextStyle(
+                            color: Colors.white.withAlpha(180),
+                            fontSize: 14,
+                            letterSpacing: 4,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
@@ -354,6 +368,7 @@ class NeonPainter extends CustomPainter {
   final List<Obstacle> obstacles;
   final int score;
   final GraphicsQuality graphicsQuality;
+  final List<Offset> trail;
 
   NeonPainter({
     required this.playerY,
@@ -361,56 +376,67 @@ class NeonPainter extends CustomPainter {
     required this.obstacles,
     required this.score,
     required this.graphicsQuality,
+    required this.trail,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final centerY = size.height / 2;
     final laneOffset = 80.0;
+    final time = DateTime.now().millisecondsSinceEpoch / 1000.0;
 
-    // Draw Lanes
-    final lanePaint = Paint()
+    // 0. Draw Moving Grid Background
+    final gridPaint = Paint()
+      ..color = Colors.cyan.withAlpha(20)
+      ..strokeWidth = 1;
+    
+    double gridSpeed = 100.0;
+    double offsetX = (time * gridSpeed) % 40;
+    
+    for (double x = -offsetX; x < size.width; x += 40) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    for (double y = 0; y < size.height; y += 40) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    // 1. Draw Lanes
+    final laneCorePaint = Paint()
+      ..color = Colors.white.withAlpha(180)
+      ..strokeWidth = 1.5;
+
+    final laneGlowPaint = Paint()
       ..color = Colors.cyan.withAlpha(100)
-      ..strokeWidth = 3
+      ..strokeWidth = 4
       ..style = PaintingStyle.stroke;
 
     if (graphicsQuality != GraphicsQuality.low) {
-      lanePaint.maskFilter = MaskFilter.blur(
+      laneGlowPaint.maskFilter = MaskFilter.blur(
         BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 8 : 3,
+        graphicsQuality == GraphicsQuality.high ? 4 : 2, // Fixed: Reduced blur for visibility
       );
+      
       if (graphicsQuality == GraphicsQuality.high) {
-        canvas.drawLine(
-          Offset(0, centerY - laneOffset - 20),
-          Offset(size.width, centerY - laneOffset - 20),
-          Paint()
-            ..color = Colors.cyan.withAlpha(50)
-            ..strokeWidth = 8
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
-        );
-        canvas.drawLine(
-          Offset(0, centerY + laneOffset + 20),
-          Offset(size.width, centerY + laneOffset + 20),
-          Paint()
-            ..color = Colors.cyan.withAlpha(50)
-            ..strokeWidth = 8
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
-        );
+        // Broad outer glow
+        final broadGlow = Paint()
+          ..color = Colors.cyan.withAlpha(40)
+          ..strokeWidth = 12
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+          
+        canvas.drawLine(Offset(0, centerY - laneOffset - 20), Offset(size.width, centerY - laneOffset - 20), broadGlow);
+        canvas.drawLine(Offset(0, centerY + laneOffset + 20), Offset(size.width, centerY + laneOffset + 20), broadGlow);
       }
     }
 
-    canvas.drawLine(
-      Offset(0, centerY - laneOffset - 20),
-      Offset(size.width, centerY - laneOffset - 20),
-      lanePaint,
-    );
-    canvas.drawLine(
-      Offset(0, centerY + laneOffset + 20),
-      Offset(size.width, centerY + laneOffset + 20),
-      lanePaint,
-    );
+    // Draw Top Lane
+    canvas.drawLine(Offset(0, centerY - laneOffset - 20), Offset(size.width, centerY - laneOffset - 20), laneGlowPaint);
+    canvas.drawLine(Offset(0, centerY - laneOffset - 20), Offset(size.width, centerY - laneOffset - 20), laneCorePaint);
+    
+    // Draw Bottom Lane
+    canvas.drawLine(Offset(0, centerY + laneOffset + 20), Offset(size.width, centerY + laneOffset + 20), laneGlowPaint);
+    canvas.drawLine(Offset(0, centerY + laneOffset + 20), Offset(size.width, centerY + laneOffset + 20), laneCorePaint);
 
-    // Draw Obstacles
+    // 2. Draw Obstacles
     final obsPaint = Paint()
       ..color = Colors.redAccent
       ..style = PaintingStyle.fill;
@@ -418,7 +444,7 @@ class NeonPainter extends CustomPainter {
     if (graphicsQuality != GraphicsQuality.low) {
       obsPaint.maskFilter = MaskFilter.blur(
         BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 10 : 5,
+        graphicsQuality == GraphicsQuality.high ? 8 : 4,
       );
     }
 
@@ -428,91 +454,89 @@ class NeonPainter extends CustomPainter {
       if (obs.isTop) {
         path.moveTo(obs.x - 20, oY);
         path.lineTo(obs.x + 20, oY);
-        path.lineTo(obs.x, oY + 30);
+        path.lineTo(obs.x, oY + 35);
       } else {
         path.moveTo(obs.x - 20, oY);
         path.lineTo(obs.x + 20, oY);
-        path.lineTo(obs.x, oY - 30);
+        path.lineTo(obs.x, oY - 35);
       }
       path.close();
       canvas.drawPath(path, obsPaint);
 
-      // Glow for obstacles
-      Paint borderPaint = Paint()
-        ..color = Colors.red.withAlpha(150)
+      // Sharp Core for obstacles
+      final obsCore = Paint()
+        ..color = Colors.white.withAlpha(200)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2;
+        ..strokeWidth = 1.5;
+      canvas.drawPath(path, obsCore);
 
       if (graphicsQuality == GraphicsQuality.high) {
-        borderPaint.strokeWidth = 4;
         canvas.drawPath(
           path,
           Paint()
-            ..color = Colors.red.withAlpha(80)
+            ..color = Colors.red.withAlpha(60)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 8
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
+            ..strokeWidth = 10
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
         );
       }
-
-      canvas.drawPath(path, borderPaint);
     }
 
-    // Draw Player
-    final playerPaint = Paint()
-      ..color = Colors.cyanAccent
-      ..style = PaintingStyle.fill;
-
+    // 3. Draw Player Trail
     if (graphicsQuality != GraphicsQuality.low) {
-      playerPaint.maskFilter = MaskFilter.blur(
-        BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 12 : 8,
-      );
+      for (int i = 0; i < trail.length; i++) {
+        final opacity = (1.0 - (i / trail.length)) * 0.5;
+        canvas.drawCircle(
+          trail[i],
+          15.0 * (1.0 - (i / trail.length)),
+          Paint()
+            ..color = Colors.cyanAccent.withOpacity(opacity)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+        );
+      }
     }
 
+    // 4. Draw Player
     final pY = centerY + (playerY * laneOffset);
     final playerRect = Rect.fromCenter(
       center: Offset(playerX, pY),
-      width: 30,
-      height: 30,
+      width: 32,
+      height: 32,
     );
 
-    // Outer Glow
-    if (graphicsQuality == GraphicsQuality.high) {
+    if (graphicsQuality != GraphicsQuality.low) {
+      // Outer Glow
       canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          playerRect.inflate(2),
-          const Radius.circular(5),
-        ),
+        RRect.fromRectAndRadius(playerRect.inflate(4), const Radius.circular(8)),
         Paint()
-          ..color = Colors.cyanAccent.withAlpha(100)
-          ..style = PaintingStyle.fill
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
+          ..color = Colors.cyanAccent.withAlpha(80)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, graphicsQuality == GraphicsQuality.high ? 15 : 8),
       );
     }
 
+    // Player Body
     canvas.drawRRect(
-      RRect.fromRectAndRadius(playerRect, const Radius.circular(5)),
-      playerPaint,
+      RRect.fromRectAndRadius(playerRect, const Radius.circular(6)),
+      Paint()..color = Colors.cyanAccent,
     );
 
-    // Core
+    // Player Core
     canvas.drawRRect(
-      RRect.fromRectAndRadius(playerRect.deflate(5), const Radius.circular(3)),
+      RRect.fromRectAndRadius(playerRect.deflate(6), const Radius.circular(4)),
       Paint()..color = Colors.white,
     );
 
-    // Speed Lines (Visual effect)
+    // 5. Speed Particles/Lines
     final linePaint = Paint()
-      ..color = Colors.white.withAlpha(30)
-      ..strokeWidth = 1;
+      ..color = Colors.white.withAlpha(40)
+      ..strokeWidth = 1.2;
 
-    for (int i = 0; i < 5; i++) {
-      double lx =
-          (DateTime.now().millisecondsSinceEpoch / 2 + i * 100) % size.width;
+    for (int i = 0; i < 8; i++) {
+      double lx = (time * 400 + i * 200) % size.width;
+      double ly = (i * size.height / 8 + (sin(time + i) * 20)) % size.height;
       canvas.drawLine(
-        Offset(size.width - lx, i * size.height / 5),
-        Offset(size.width - lx - 50, i * size.height / 5),
+        Offset(size.width - lx, ly),
+        Offset(size.width - lx - 40, ly),
         linePaint,
       );
     }
