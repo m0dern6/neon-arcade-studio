@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
 class VectorVoidGame extends StatefulWidget {
-  const VectorVoidGame({super.key});
+  final String? uid;
+  const VectorVoidGame({super.key, this.uid});
 
   @override
   State<VectorVoidGame> createState() => _VectorVoidGameState();
@@ -27,6 +27,7 @@ class _VectorVoidGameState extends State<VectorVoidGame>
   List<VoidEnemy> enemies = [];
   double speedFactor = 1.0;
   DateTime? lastSpawnTime;
+  DateTime _lastMoveTime = DateTime.now(); // Track last movement
 
   final Random random = Random();
   late GraphicsQuality _graphicsQuality;
@@ -61,6 +62,7 @@ class _VectorVoidGameState extends State<VectorVoidGame>
         MediaQuery.of(context).size.height / 2,
       );
       lastSpawnTime = DateTime.now();
+      _lastMoveTime = DateTime.now();
     });
     AudioManager().playSfx('start.mp3');
     _controller.repeat();
@@ -137,20 +139,28 @@ class _VectorVoidGameState extends State<VectorVoidGame>
       );
     }
 
-    // Direction towards center with some randomness
-    Offset target = Offset(
-      MediaQuery.of(context).size.width / 2 + (random.nextDouble() - 0.5) * 100,
-      MediaQuery.of(context).size.height / 2 +
-          (random.nextDouble() - 0.5) * 100,
-    );
+    // ANTI-EXPLOIT: If player hasn't moved for 3 seconds, target them directly!
+    bool isPlayerStatic = DateTime.now().difference(_lastMoveTime).inSeconds >= 3;
+    
+    Offset target;
+    if (isPlayerStatic) {
+      // Sniping mode: Target the player exactly
+      target = playerPos;
+    } else {
+      // Normal mode: Target center with randomness
+      target = Offset(
+        MediaQuery.of(context).size.width / 2 + (random.nextDouble() - 0.5) * 100,
+        MediaQuery.of(context).size.height / 2 + (random.nextDouble() - 0.5) * 100,
+      );
+    }
     Offset dir = (target - pos);
     dir = Offset(dir.dx / dir.distance, dir.dy / dir.distance);
 
     return VoidEnemy(
       pos: pos,
       dir: dir,
-      speed: (3.0 + random.nextDouble() * 2) * speedFactor,
-      color: Colors.greenAccent,
+      speed: (3.0 + random.nextDouble() * 2) * speedFactor * (isPlayerStatic ? 1.5 : 1.0),
+      color: isPlayerStatic ? Colors.orangeAccent : Colors.greenAccent,
     );
   }
 
@@ -161,11 +171,8 @@ class _VectorVoidGameState extends State<VectorVoidGame>
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
 
-    // Persist score to Firebase if user is logged in
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      DatabaseService(uid: user.uid).updateScore('vector_void', score);
-    }
+    // Persist score
+    DatabaseService(uid: widget.uid).updateScore('vector_void', score);
   }
 
   @override
@@ -193,6 +200,7 @@ class _VectorVoidGameState extends State<VectorVoidGame>
             if (isStarted && !isGameOver && !isPaused) {
               setState(() {
                 playerPos += details.delta;
+                _lastMoveTime = DateTime.now(); // Reset movement timer
               });
             }
           },
@@ -420,20 +428,19 @@ class VoidPainter extends CustomPainter {
     canvas.drawCircle(playerPos, 15, playerPaint);
     canvas.drawCircle(playerPos, 8, Paint()..color = Colors.white);
 
-    // Enemies
-    final enemyPaint = Paint()
-      ..color = Colors.greenAccent.withAlpha(150)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-
-    if (graphicsQuality != GraphicsQuality.low) {
-      enemyPaint.maskFilter = MaskFilter.blur(
-        BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 8 : 3,
-      );
-    }
-
     for (var enemy in enemies) {
+      final curEnemyPaint = Paint()
+        ..color = enemy.color.withAlpha(150)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+
+      if (graphicsQuality != GraphicsQuality.low) {
+        curEnemyPaint.maskFilter = MaskFilter.blur(
+          BlurStyle.normal,
+          graphicsQuality == GraphicsQuality.high ? 8 : 3,
+        );
+      }
+
       Path path = Path();
       path.moveTo(enemy.pos.dx, enemy.pos.dy - 10);
       path.lineTo(enemy.pos.dx + 8, enemy.pos.dy + 8);
@@ -444,14 +451,14 @@ class VoidPainter extends CustomPainter {
         canvas.drawPath(
           path,
           Paint()
-            ..color = Colors.greenAccent.withAlpha(50)
+            ..color = enemy.color.withAlpha(50)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 6
             ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
         );
       }
 
-      canvas.drawPath(path, enemyPaint);
+      canvas.drawPath(path, curEnemyPaint);
       canvas.drawPath(
         path,
         Paint()

@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
 class OrbitalStrikeGame extends StatefulWidget {
-  const OrbitalStrikeGame({super.key});
+  final String? uid;
+  const OrbitalStrikeGame({super.key, this.uid});
 
   @override
   State<OrbitalStrikeGame> createState() => _OrbitalStrikeGameState();
@@ -147,11 +147,8 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
 
-    // Persist score to Firebase if user is logged in
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      DatabaseService(uid: user.uid).updateScore('orbital', score);
-    }
+    // Persist score
+    DatabaseService(uid: widget.uid).updateScore('orbital', score);
   }
 
   void _onTap() {

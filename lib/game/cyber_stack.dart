@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
 class CyberStackGame extends StatefulWidget {
-  const CyberStackGame({super.key});
+  final String? uid;
+  const CyberStackGame({super.key, this.uid});
 
   @override
   State<CyberStackGame> createState() => _CyberStackGameState();
@@ -135,11 +135,8 @@ class _CyberStackGameState extends State<CyberStackGame>
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
 
-    // Persist score to Firebase if user is logged in
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      DatabaseService(uid: user.uid).updateScore('cyber_stack', score);
-    }
+    // Persist score
+    DatabaseService(uid: widget.uid).updateScore('cyber_stack', score);
   }
 
   @override
