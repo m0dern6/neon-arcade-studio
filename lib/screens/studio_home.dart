@@ -42,17 +42,13 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
   }
 
   Future<void> _loadUserScores(User? user) async {
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          localBestScores = {};
-        });
-      }
-      return;
+    final db = DatabaseService(uid: user?.uid);
+    
+    if (user != null) {
+      await db.migrateGuestScores(); // Ensure migration on every login/refresh
+      await db.syncPendingScores();
     }
-
-    final db = DatabaseService(uid: user.uid);
-    await db.syncPendingScores();
+    
     final cached = await db.getCachedBestScores();
     if (mounted) {
       setState(() {
@@ -63,7 +59,18 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
 
   void _autoSignIn() async {
     try {
-      await _authService.signInSilently();
+      // 1. Try to sign in silently first
+      User? user = await _authService.signInSilently();
+      
+      // 2. If silent sign-in fails and user is still null, 
+      //    prompt with the interactive Play Games sign-in "box".
+      if (user == null) {
+        user = await _authService.signInWithPlayGames();
+      }
+
+      if (user != null && mounted) {
+        await DatabaseService(uid: user.uid).migrateGuestScores();
+      }
     } catch (e) {
       print("Auto sign-in failed: $e");
     }
@@ -265,46 +272,80 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Row(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  user.displayName ?? 'Player',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: _authService.isSyncingProfile,
+      builder: (context, isSyncing, _) {
+        if (isSyncing) {
+          return Row(
+            children: [
+              Text(
+                'SYNCING...',
+                style: TextStyle(
+                  color: Colors.white.withAlpha(150),
+                  fontSize: 10,
+                  letterSpacing: 2,
                 ),
-                GestureDetector(
-                  onTap: _handleSignOut,
-                  child: Text(
-                    'SIGN OUT',
-                    style: TextStyle(
-                      color: Colors.white.withAlpha(150),
-                      fontSize: 10,
-                      letterSpacing: 1,
+              ),
+              const SizedBox(width: 8),
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                ),
+              ),
+            ],
+          );
+        }
+
+        // Use the absolute latest user data after sync finishes
+        final latestUser = FirebaseAuth.instance.currentUser ?? user;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Row(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      latestUser.displayName ?? 'Player',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: _handleSignOut,
+                      child: Text(
+                        'SIGN OUT',
+                        style: TextStyle(
+                          color: Colors.white.withAlpha(150),
+                          fontSize: 10,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: Colors.white10,
+                  backgroundImage: latestUser.photoURL != null
+                      ? NetworkImage(latestUser.photoURL!)
+                      : null,
+                  child: latestUser.photoURL == null ? const Icon(Icons.person, color: Colors.white54) : null,
                 ),
               ],
             ),
-            const SizedBox(width: 12),
-            CircleAvatar(
-              radius: 20,
-              backgroundImage: user.photoURL != null
-                  ? NetworkImage(user.photoURL!)
-                  : null,
-              child: user.photoURL == null ? const Icon(Icons.person) : null,
-            ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -314,6 +355,12 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
       stream: _authService.user,
       builder: (context, authSnapshot) {
         final user = authSnapshot.data;
+        if (user != null) {
+          print("StudioHomeScreen: Building UI for User: ${user.uid}");
+          print("StudioHomeScreen: User Data -> Name: ${user.displayName}, Photo: ${user.photoURL}");
+        } else {
+          print("StudioHomeScreen: Building UI for Guest Mode");
+        }
 
         return StreamBuilder<DocumentSnapshot>(
           stream: user != null
@@ -335,6 +382,8 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
               remoteBestScores,
             );
 
+            final String? currentUid = user?.uid;
+
             final List<GameMetadata> games = [
               GameMetadata(
                 id: 'neon_gravity',
@@ -342,7 +391,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 description: 'Defy gravity in a high-speed neon runner.',
                 icon: Icons.unfold_more,
                 themeColor: Colors.cyanAccent,
-                gameWidget: const NeonGravityGame(),
+                gameWidget: NeonGravityGame(uid: currentUid),
               ),
               GameMetadata(
                 id: 'orbital',
@@ -350,7 +399,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 description: 'Defend the core from circular threats.',
                 icon: Icons.blur_circular,
                 themeColor: Colors.pinkAccent,
-                gameWidget: const OrbitalStrikeGame(),
+                gameWidget: OrbitalStrikeGame(uid: currentUid),
               ),
               GameMetadata(
                 id: 'pulse_dash',
@@ -358,7 +407,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 description: 'Master the rhythm in this reaction test.',
                 icon: Icons.bolt,
                 themeColor: Colors.yellowAccent,
-                gameWidget: const PulseDashGame(),
+                gameWidget: PulseDashGame(uid: currentUid),
               ),
               GameMetadata(
                 id: 'cyber_stack',
@@ -366,7 +415,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 description: 'Stack the blocks with perfect precision.',
                 icon: Icons.layers,
                 themeColor: Colors.purpleAccent,
-                gameWidget: const CyberStackGame(),
+                gameWidget: CyberStackGame(uid: currentUid),
               ),
               GameMetadata(
                 id: 'vector_void',
@@ -374,7 +423,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 description: 'Dodge the incoming geometric vectors.',
                 icon: Icons.change_history,
                 themeColor: Colors.greenAccent,
-                gameWidget: const VectorVoidGame(),
+                gameWidget: VectorVoidGame(uid: currentUid),
               ),
             ];
 

@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final String uid;
+  final String? uid;
 
   static StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   static bool _syncInitialized = false;
@@ -17,9 +17,10 @@ class DatabaseService {
 
   static const String _localBestPrefix = 'local_best_scores_';
   static const String _pendingPrefix = 'pending_scores_';
+  static const String _guestScoresKey = 'guest_best_scores';
   static const int _maxRetryDelaySeconds = 60;
 
-  DatabaseService({required this.uid});
+  DatabaseService({this.uid});
 
   // Collection reference
   late final CollectionReference _scoresCollection = _db.collection('scores');
@@ -28,16 +29,15 @@ class DatabaseService {
     if (_syncInitialized) return;
     _syncInitialized = true;
 
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((
-      results,
-    ) async {
-      if (results.contains(ConnectivityResult.none)) return;
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((results) async {
+          if (results.contains(ConnectivityResult.none)) return;
 
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) return;
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser == null) return;
 
-      await DatabaseService(uid: currentUser.uid).syncPendingScores();
-    });
+          await DatabaseService(uid: currentUser.uid).syncPendingScores();
+        });
   }
 
   static Future<void> disposeSync() async {
@@ -47,8 +47,16 @@ class DatabaseService {
   }
 
   Future<void> updateScore(String gameId, int score) async {
+    // 1. Always update the local "contextual" score (either guest or specific user)
     final int localBest = await _saveLocalBestScore(gameId, score);
 
+    // 2. If no user is signed in, we only save to the general guest pool as well
+    if (uid == null) {
+      await _saveGuestScore(gameId, score);
+      return;
+    }
+
+    // 3. If signed in, attempt to sync with Firestore
     try {
       final doc = await _scoresCollection
           .doc(uid)
@@ -72,7 +80,50 @@ class DatabaseService {
     }
   }
 
+  /// Migrates scores from the guest pool to a newly signed-in account.
+  /// If the account already has scores in Firebase, the guest scores are cleared
+  /// without overwriting the existing cloud data (priority goes to Cloud).
+  Future<void> migrateGuestScores() async {
+    if (uid == null) return;
+
+    final guestScores = await _readIntMap(_guestScoresKey);
+    if (guestScores.isEmpty) return;
+
+    try {
+      final doc = await _scoresCollection.doc(uid).get();
+      final bool hasRemoteData = doc.exists && doc.data() != null;
+
+      if (!hasRemoteData) {
+        // New account or no remote scores: Push all guest scores to Firestore
+        final batch = _db.batch();
+        final Map<String, dynamic> dataToSet = {
+          'uid': uid,
+          'displayName':
+              FirebaseAuth.instance.currentUser?.displayName ?? 'Player',
+          'last_updated': FieldValue.serverTimestamp(),
+        };
+
+        guestScores.forEach((gameId, score) {
+          dataToSet[gameId] = score;
+          _saveLocalBestScore(gameId, score); // Also update user-specific local
+        });
+
+        batch.set(_scoresCollection.doc(uid), dataToSet, SetOptions(merge: true));
+        await batch.commit();
+      } else {
+        // Account exists: Discard guest scores as per user request
+        print("Account already has scores. Discarding local guest scores.");
+      }
+
+      // In both cases, clear the guest pool once we've crossed the "login" threshold
+      await _clearGuestScores();
+    } catch (e) {
+      print("Migration failed: $e");
+    }
+  }
+
   Future<void> syncPendingScores() async {
+    if (uid == null) return;
     final pending = await _readIntMap(_pendingStorageKey);
     if (pending.isEmpty) return;
 
@@ -97,7 +148,6 @@ class DatabaseService {
         }
         pending.remove(gameId);
       } catch (_) {
-        // Keep remaining pending scores for next online attempt.
         hasFailures = true;
       }
     }
@@ -112,14 +162,19 @@ class DatabaseService {
   }
 
   Future<Map<String, int>> getCachedBestScores() async {
+    if (uid == null) {
+      return _readIntMap(_guestScoresKey);
+    }
     return _readIntMap(_localBestStorageKey);
   }
 
-  // Get single game best score for current user
+  // Get single game best score
   Future<int> getBestScore(String gameId) async {
     try {
-      final localBestScores = await _readIntMap(_localBestStorageKey);
-      final localBest = localBestScores[gameId] ?? 0;
+      final localScores = await getCachedBestScores();
+      final localBest = localScores[gameId] ?? 0;
+
+      if (uid == null) return localBest;
 
       final doc = await _scoresCollection.doc(uid).get();
       if (doc.exists && doc.data() != null) {
@@ -130,13 +185,14 @@ class DatabaseService {
       return localBest;
     } catch (e) {
       print("Error getting best score: $e");
-      final localBestScores = await _readIntMap(_localBestStorageKey);
-      return localBestScores[gameId] ?? 0;
+      final localScores = await getCachedBestScores();
+      return localScores[gameId] ?? 0;
     }
   }
 
   // Get all high scores for current user
   Stream<DocumentSnapshot> get userData {
+    if (uid == null) return const Stream.empty();
     return _scoresCollection.doc(uid).snapshots();
   }
 
@@ -153,8 +209,8 @@ class DatabaseService {
   }
 
   Future<void> _pushScoreToFirestore(String gameId, int score) async {
+    if (uid == null) return;
     final docRef = _scoresCollection.doc(uid);
-    // Use a local-first write. Firestore can queue this offline and sync later.
     await docRef.set({
       gameId: score,
       'uid': uid,
@@ -164,15 +220,31 @@ class DatabaseService {
   }
 
   Future<int> _saveLocalBestScore(String gameId, int score) async {
-    final map = await _readIntMap(_localBestStorageKey);
+    final key = uid == null ? _guestScoresKey : _localBestStorageKey;
+    final map = await _readIntMap(key);
     final current = map[gameId] ?? 0;
     final next = score > current ? score : current;
     map[gameId] = next;
-    await _writeIntMap(_localBestStorageKey, map);
+    await _writeIntMap(key, map);
     return next;
   }
 
+  Future<void> _saveGuestScore(String gameId, int score) async {
+    final map = await _readIntMap(_guestScoresKey);
+    final current = map[gameId] ?? 0;
+    if (score > current) {
+      map[gameId] = score;
+      await _writeIntMap(_guestScoresKey, map);
+    }
+  }
+
+  Future<void> _clearGuestScores() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_guestScoresKey);
+  }
+
   Future<void> _savePendingScore(String gameId, int score) async {
+    if (uid == null) return;
     final pending = await _readIntMap(_pendingStorageKey);
     final current = pending[gameId] ?? 0;
     pending[gameId] = score > current ? score : current;
@@ -180,6 +252,7 @@ class DatabaseService {
   }
 
   Future<void> _removePendingScore(String gameId) async {
+    if (uid == null) return;
     final pending = await _readIntMap(_pendingStorageKey);
     pending.remove(gameId);
     await _writeIntMap(_pendingStorageKey, pending);
@@ -190,13 +263,17 @@ class DatabaseService {
     final raw = prefs.getString(key);
     if (raw == null || raw.isEmpty) return {};
 
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return {};
 
-    return decoded.map((k, v) {
-      final value = v is int ? v : int.tryParse(v.toString()) ?? 0;
-      return MapEntry(k, value);
-    });
+      return decoded.map((k, v) {
+        final value = v is int ? v : int.tryParse(v.toString()) ?? 0;
+        return MapEntry(k, value);
+      });
+    } catch (e) {
+      return {};
+    }
   }
 
   Future<void> _writeIntMap(String key, Map<String, int> value) async {
@@ -205,22 +282,24 @@ class DatabaseService {
   }
 
   void _scheduleRetrySync() {
-    _retryTimers[uid]?.cancel();
+    if (uid == null) return;
+    _retryTimers[uid!]?.cancel();
 
-    final nextAttempt = (_retryAttempts[uid] ?? 0) + 1;
-    _retryAttempts[uid] = nextAttempt;
+    final nextAttempt = (_retryAttempts[uid!] ?? 0) + 1;
+    _retryAttempts[uid!] = nextAttempt;
 
     final delaySeconds = (1 << (nextAttempt - 1)).clamp(
       2,
       _maxRetryDelaySeconds,
     );
-    _retryTimers[uid] = Timer(Duration(seconds: delaySeconds), () async {
+    _retryTimers[uid!] = Timer(Duration(seconds: delaySeconds), () async {
       await syncPendingScores();
     });
   }
 
   void _clearRetryState() {
-    _retryTimers[uid]?.cancel();
+    if (uid == null) return;
+    _retryTimers[uid!]?.cancel();
     _retryTimers.remove(uid);
     _retryAttempts.remove(uid);
   }
