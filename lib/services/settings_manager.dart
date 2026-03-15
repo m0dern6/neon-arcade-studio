@@ -8,13 +8,13 @@ class SettingsManager {
 
   SettingsManager._internal();
 
-  GraphicsQuality _graphicsQuality = GraphicsQuality.low;
+  GraphicsQuality _graphicsQuality = GraphicsQuality.medium;
 
   GraphicsQuality get graphicsQuality => _graphicsQuality;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    final qualityIndex = prefs.getInt('graphics_quality') ?? 0;
+    final qualityIndex = prefs.getInt('graphics_quality') ?? GraphicsQuality.medium.index;
     _graphicsQuality = GraphicsQuality.values[qualityIndex];
   }
 
