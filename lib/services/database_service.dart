@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final String? uid;
+  static final StreamController<Map<String, int>> _guestScoreController = StreamController<Map<String, int>>.broadcast();
 
   static StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   static bool _syncInitialized = false;
@@ -53,6 +54,8 @@ class DatabaseService {
     // 2. If no user is signed in, we only save to the general guest pool as well
     if (uid == null) {
       await _saveGuestScore(gameId, score);
+      final guestData = await _readIntMap(_guestScoresKey);
+      _guestScoreController.add(guestData);
       return;
     }
 
@@ -190,10 +193,14 @@ class DatabaseService {
     }
   }
 
-  // Get all high scores for current user
-  Stream<DocumentSnapshot> get userData {
-    if (uid == null) return const Stream.empty();
-    return _scoresCollection.doc(uid).snapshots();
+  // Get all high scores for current user or guest
+  Stream<Map<String, dynamic>> get userDataStream {
+    if (uid == null) {
+      // Local Guest Stream
+      return _guestScoreController.stream.map((map) => Map<String, dynamic>.from(map));
+    }
+    // Remote Firestore Stream
+    return _scoresCollection.doc(uid).snapshots().map((doc) => doc.data() as Map<String, dynamic>? ?? {});
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> leaderboardStream(
