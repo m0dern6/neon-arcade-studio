@@ -1,151 +1,132 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:games_services/games_services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart'; 
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  bool _isSigningIn = false;
   final ValueNotifier<bool> isSyncingProfile = ValueNotifier(false);
+  final ValueNotifier<bool> isPgsLinked = ValueNotifier(false);
 
   // The Web Client ID from Google Cloud Console (used as serverClientId)
   static const String _serverClientId =
       '280328504204-i08tpigvu33a05jevdnocrauvbrovupg.apps.googleusercontent.com';
-  
-  static const String _syncPrefsKey = 'google_profile_synced';
 
-  Stream<User?> get user => _auth.authStateChanges();
-
-  Future<User?> signInSilently() async {
-    try {
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        // 1. Silent sign-in to Google Play Games
-        final String? authCode = await GamesServices.getAuthCode(_serverClientId);
-        if (authCode != null) {
-          final User? user = await _authenticateWithPlayGames(authCode);
-          if (user != null) {
-            print("AuthService: Silent Play Games Sign-In Success!");
-            // Automatically ensure profile is correct
-            await ensureProfileSynced(user);
-          }
-          return _auth.currentUser;
-        }
-      }
-      return _auth.currentUser;
-    } catch (e) {
-      print("Silent sign-in failed: $e");
-      return _auth.currentUser;
+  Stream<User?> get user => _auth.authStateChanges().map((u) {
+    if (u != null) {
+      isPgsLinked.value = isUserLinkedWithPlayGames(u);
+    } else {
+      isPgsLinked.value = false;
     }
+    return u;
+  });
+
+  bool isUserLinkedWithPlayGames(User user) {
+    return user.providerData.any((p) => p.providerId == 'playgames.google.com');
   }
 
-  Future<User?> signInWithPlayGames() async {
-    if (_isSigningIn) return _auth.currentUser;
-    _isSigningIn = true;
-
+  /// Attempts to recover existing Google Master session silently.
+  Future<User?> initializeAuth() async {
     try {
-      if (defaultTargetPlatform != TargetPlatform.android) {
-        print("Play Games Sign-In is only supported on Android.");
-        return _auth.currentUser;
-      }
-
-      // 1. Explicitly sign in to Google Play Games (shows the "Welcome" overlay)
-      await GamesServices.signIn();
-
-      // 2. Get the auth code
-      final String? authCode = await GamesServices.getAuthCode(_serverClientId);
-
-      if (authCode == null) return _auth.currentUser;
-
-      // 3. Authenticate with Firebase
-      User? user = await _authenticateWithPlayGames(authCode);
-
-      // 4. Force sync (can show UI since this is already an interactive flow)
-      if (user != null) {
-        await ensureProfileSynced(user, forceInteractive: true);
-      }
-      return _auth.currentUser;
-    } catch (e) {
-      print("Play games sign-in error: $e");
-      return _auth.currentUser;
-    } finally {
-      _isSigningIn = false;
-    }
-  }
-
-  Future<User?> _authenticateWithPlayGames(String authCode) async {
-    try {
-      // Create a Firebase credential using the auth code
-      // Create a Firebase credential using the auth code
-      final AuthCredential credential = PlayGamesAuthProvider.credential(
-        serverAuthCode: authCode,
-      );
-
-      // Sign in to Firebase
-      final UserCredential userCredential = await _auth.signInWithCredential(
-        credential,
-      );
-
-      final User? user = userCredential.user;
-      if (user != null) {
-        print("AuthService: Firebase Sign-In Success!");
-        print("AuthService: UID - ${user.uid}");
-        print("AuthService: Display Name - ${user.displayName}");
-        print("AuthService: Photo URL - ${user.photoURL}");
-        print(
-          "AuthService: Provider Data - ${user.providerData.map((p) => p.providerId).toList()}",
+      final GoogleSignIn googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      final GoogleSignInAccount? masterAccount = await googleSignIn.signInSilently();
+      
+      if (masterAccount != null) {
+        final GoogleSignInAuthentication gAuth = await masterAccount.authentication;
+        final AuthCredential credential = GoogleAuthProvider.credential(
+          idToken: gAuth.idToken,
+          accessToken: gAuth.accessToken,
         );
+        final UserCredential userCredential = await _auth.signInWithCredential(credential);
+        final User? user = userCredential.user;
+        
+        if (user != null) {
+          isPgsLinked.value = isUserLinkedWithPlayGames(user);
+          // Try to sync Play Games silently
+          await syncPlayGames(user, masterAccount.email, silentOnly: true);
+        }
+        return user;
+      }
+      return _auth.currentUser;
+    } catch (e) {
+      print("AuthService: Silent initialization failed: $e");
+      return _auth.currentUser;
+    }
+  }
+
+  /// Interactive Google Master Login
+  Future<User?> signInWithGoogleMaster(BuildContext context) async {
+    isSyncingProfile.value = true;
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      // We don't sign out first unless necessary, but let's keep it clean
+      final GoogleSignInAccount? masterAccount = await googleSignIn.signIn();
+      
+      if (masterAccount == null) return null;
+
+      final GoogleSignInAuthentication gAuth = await masterAccount.authentication;
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        idToken: gAuth.idToken,
+        accessToken: gAuth.accessToken,
+      );
+      final UserCredential userCredential = await _auth.signInWithCredential(credential);
+      final User? user = userCredential.user;
+
+      if (user != null) {
+        // After master login, attempt a SEAMLESS Play Games sync
+        await syncPlayGames(user, masterAccount.email, silentOnly: false);
       }
       return user;
     } catch (e) {
-      print("Firebase Play Games authentication failed: $e");
+      print("AuthService: Google Master sign-in failed: $e");
       return null;
+    } finally {
+      isSyncingProfile.value = false;
     }
   }
 
-  /// Attempts to fetch the user's primary Google profile silently.
-  /// Ensures the Firebase user profile matches their Google Identity.
-  /// It tries silently first. If it has NEVER synced before, it allows one interactive prompt.
-  Future<void> ensureProfileSynced(User user, {bool forceInteractive = false}) async {
-    isSyncingProfile.value = true;
+  /// Synchronizes Play Games ID silently.
+  /// No UI prompts, no dialogs. If it fails, it just returns.
+  Future<void> syncPlayGames(
+    User user, 
+    String masterEmail, 
+    {required bool silentOnly}
+  ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final bool alreadySynced = prefs.getBool(_syncPrefsKey) ?? false;
-      
-      print("AuthService: Starting Profile Sync Check. AlreadySynced: $alreadySynced");
-
-      final GoogleSignIn googleSignIn = GoogleSignIn(
+      final googleSignInGames = GoogleSignIn(
+        signInOption: SignInOption.games,
         serverClientId: _serverClientId,
-        scopes: ['profile', 'email'],
+        scopes: ['email'],
       );
 
-      // 1. Always try silent first
-      GoogleSignInAccount? googleAccount = await googleSignIn.signInSilently();
+      // 1. Try silent first
+      GoogleSignInAccount? pgsAccount = await googleSignInGames.signInSilently();
       
-      // 2. If silent fails, and we haven't synced ever OR we are forcing it, try interactive
-      if (googleAccount == null && (!alreadySynced || forceInteractive)) {
-        print("AuthService: Silent sync failed and never synced before. Prompting once...");
-        googleAccount = await googleSignIn.signIn();
+      // 2. If silent failed and we are allowed to be interactive (but still silent UI-wise)
+      if (pgsAccount == null && !silentOnly) {
+        try {
+          await GamesServices.signIn();
+          pgsAccount = await googleSignInGames.signIn();
+        } catch (e) {
+          print("AuthService: Silent-ish PGS selection fail: $e");
+        }
       }
-      
-      if (googleAccount != null) {
-        print("AuthService: Syncing with Google Account: ${googleAccount.displayName}");
-        
-        await user.updateDisplayName(googleAccount.displayName);
-        await user.updatePhotoURL(googleAccount.photoUrl);
-        await user.reload();
-        
-        // Mark as synced
-        await prefs.setBool(_syncPrefsKey, true);
-        print("AuthService: Profile Sync Complete.");
-      } else {
-        print("AuthService: No Google account selected for sync.");
+
+      // 3. Final Verification and Linking (ONLY if emails match)
+      if (pgsAccount != null && pgsAccount.email == masterEmail) {
+        final String? authCode = await GamesServices.getAuthCode(_serverClientId);
+        if (authCode != null) {
+          final AuthCredential pgCredential = PlayGamesAuthProvider.credential(
+            serverAuthCode: authCode,
+          );
+          
+          await user.linkWithCredential(pgCredential);
+          isPgsLinked.value = true;
+        }
       }
-    } catch (e, stack) {
-      print("AuthService: Profile Sync Error: $e");
-      print(stack);
-    } finally {
-      isSyncingProfile.value = false;
+    } catch (e) {
+      print("AuthService: PGS Sync Error: $e");
     }
   }
 
@@ -153,6 +134,7 @@ class AuthService {
     try {
       await _auth.signOut();
       await GoogleSignIn().signOut();
+      isPgsLinked.value = false;
     } catch (e) {
       print("Sign out error: $e");
     }

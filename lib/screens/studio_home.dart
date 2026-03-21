@@ -7,7 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../models/game_data.dart';
 import '../game/neon_gravity.dart';
 import '../game/orbital_strike.dart';
-import '../game/pulse_dash.dart';
+import '../game/cyber_slice.dart';
 import '../game/cyber_stack.dart';
 import '../game/vector_void.dart';
 import '../game/audio_manager.dart';
@@ -59,17 +59,16 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
 
   void _autoSignIn() async {
     try {
-      // 1. Try to sign in silently first
-      User? user = await _authService.signInSilently();
+      // 1. Try to initialize and recover the unified session
+      User? user = await _authService.initializeAuth();
       
-      // 2. If silent sign-in fails and user is still null, 
-      //    prompt with the interactive Play Games sign-in "box".
-      if (user == null) {
-        user = await _authService.signInWithPlayGames();
-      }
-
-      if (user != null && mounted) {
-        await DatabaseService(uid: user.uid).migrateGuestScores();
+      // 2. If no account is recovered, automatically open the sign-in box after frame
+      if (user == null && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (mounted) {
+            await _authService.signInWithGoogleMaster(context);
+          }
+        });
       }
     } catch (e) {
       print("Auto sign-in failed: $e");
@@ -259,15 +258,18 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
 
   Widget _buildProfileHeader(User? user) {
     if (user == null) {
-      return ElevatedButton.icon(
-        onPressed: () => _authService.signInWithPlayGames(),
-        icon: const Icon(Icons.games),
-        label: const Text('PLAY GAMES'),
+      return ElevatedButton(
+        onPressed: () => _authService.signInWithGoogleMaster(context),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.white.withAlpha(20),
           foregroundColor: Colors.white,
           side: BorderSide(color: Colors.white.withAlpha(50)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: const Text(
+          'SIGN IN',
+          style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.bold),
         ),
       );
     }
@@ -302,44 +304,51 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
         // Use the absolute latest user data after sync finishes
         final latestUser = FirebaseAuth.instance.currentUser ?? user;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                Row(
                   children: [
-                    Text(
-                      latestUser.displayName ?? 'Player',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: _handleSignOut,
-                      child: Text(
-                        'SIGN OUT',
-                        style: TextStyle(
-                          color: Colors.white.withAlpha(150),
-                          fontSize: 10,
-                          letterSpacing: 1,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          latestUser.displayName ?? 'Player',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        GestureDetector(
+                          onTap: _handleSignOut,
+                          child: Text(
+                            'SIGN OUT',
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(150),
+                              fontSize: 10,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: Colors.white10,
+                      backgroundImage: latestUser.photoURL != null
+                          ? NetworkImage(latestUser.photoURL!)
+                          : null,
+                      child: latestUser.photoURL == null ? const Icon(Icons.person, color: Colors.white54) : null,
                     ),
                   ],
-                ),
-                const SizedBox(width: 12),
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: Colors.white10,
-                  backgroundImage: latestUser.photoURL != null
-                      ? NetworkImage(latestUser.photoURL!)
-                      : null,
-                  child: latestUser.photoURL == null ? const Icon(Icons.person, color: Colors.white54) : null,
                 ),
               ],
             ),
@@ -362,14 +371,13 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
           print("StudioHomeScreen: Building UI for Guest Mode");
         }
 
-        return StreamBuilder<DocumentSnapshot>(
-          stream: user != null
-              ? DatabaseService(uid: user.uid).userData
-              : const Stream.empty(),
+        return StreamBuilder<Map<String, dynamic>>(
+          stream: DatabaseService(uid: user?.uid).userDataStream,
+          initialData: user == null ? Map<String, dynamic>.from(localBestScores) : null,
           builder: (context, scoreSnapshot) {
             final remoteBestScores = <String, int>{};
-            if (scoreSnapshot.hasData && scoreSnapshot.data!.exists) {
-              final data = scoreSnapshot.data!.data() as Map<String, dynamic>;
+            if (scoreSnapshot.hasData && scoreSnapshot.data != null) {
+              final data = scoreSnapshot.data!;
               for (final entry in data.entries) {
                 if (entry.value is num) {
                   remoteBestScores[entry.key] = (entry.value as num).toInt();
@@ -402,12 +410,12 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
                 gameWidget: OrbitalStrikeGame(uid: currentUid),
               ),
               GameMetadata(
-                id: 'pulse_dash',
-                title: 'Pulse Dash',
-                description: 'Master the rhythm in this reaction test.',
-                icon: Icons.bolt,
-                themeColor: Colors.yellowAccent,
-                gameWidget: PulseDashGame(uid: currentUid),
+                id: 'pulse_dash', // Keeping ID same for score compatibility
+                title: 'Cyber Slice',
+                description: 'Slice the neon cores and avoid data bombs.',
+                icon: Icons.content_cut,
+                themeColor: Colors.cyanAccent,
+                gameWidget: CyberSliceGame(uid: currentUid),
               ),
               GameMetadata(
                 id: 'cyber_stack',
