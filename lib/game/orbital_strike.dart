@@ -1,187 +1,154 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/app_providers.dart';
 import '../services/database_service.dart';
 import '../services/settings_manager.dart';
 import 'audio_manager.dart';
 import '../widgets/pause_overlay.dart';
 
-class OrbitalStrikeGame extends StatefulWidget {
+class OrbitalStrikeGame extends ConsumerStatefulWidget {
   final String? uid;
   const OrbitalStrikeGame({super.key, this.uid});
 
   @override
-  State<OrbitalStrikeGame> createState() => _OrbitalStrikeGameState();
+  ConsumerState<OrbitalStrikeGame> createState() => _OrbitalStrikeGameState();
 }
 
-class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
+class _OrbitalStrikeGameState extends ConsumerState<OrbitalStrikeGame>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
-  // Game State
+  // ── Game state ────────────────────────────────────────────────────────────
   double shieldAngle = 0;
-  double shieldRotationDirection = 1.0; // 1 for clockwise, -1 for counter
-  double shieldWidth = pi / 2; // 90 degrees
-
+  double shieldRotationDirection = 1.0;
+  double shieldWidth = pi / 2;
   List<Enemy> enemies = [];
-  int score = 0;
-  bool isGameOver = false;
-  bool isStarted = false;
-  bool isPaused = false;
-  double spawnRate = 2000; // ms
-  DateTime? lastSpawnTime;
+  double spawnRate = 2000;
+  int _lastSpawnMs = 0;
+
+  final ValueNotifier<int> _score = ValueNotifier(0);
+  final ValueNotifier<bool> _isGameOver = ValueNotifier(false);
+  final ValueNotifier<bool> _isStarted = ValueNotifier(false);
+  final ValueNotifier<bool> _isPaused = ValueNotifier(false);
 
   final Random random = Random();
-  late GraphicsQuality _graphicsQuality;
 
   @override
   void initState() {
     super.initState();
-    _graphicsQuality = SettingsManager().graphicsQuality;
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
     )..addListener(_update);
   }
 
-  void _cycleGraphics() {
-    setState(() {
-      int next = (_graphicsQuality.index + 1) % GraphicsQuality.values.length;
-      _graphicsQuality = GraphicsQuality.values[next];
-      SettingsManager().setGraphicsQuality(_graphicsQuality);
-    });
-  }
-
   void _startGame() {
-    setState(() {
-      score = 0;
-      isGameOver = false;
-      isStarted = true;
-      enemies = [];
-      shieldAngle = 0;
-      spawnRate = 2000;
-      lastSpawnTime = DateTime.now();
-    });
+    _score.value = 0;
+    _isGameOver.value = false;
+    _isStarted.value = true;
+    enemies = [];
+    shieldAngle = 0;
+    spawnRate = 2000;
+    _lastSpawnMs = DateTime.now().millisecondsSinceEpoch;
     AudioManager().playSfx('start.mp3');
     _controller.repeat();
   }
 
   void _update() {
-    if (isGameOver || !isStarted || isPaused) return;
+    if (_isGameOver.value || !_isStarted.value || _isPaused.value) return;
 
-    setState(() {
-      // Rotate shield - Speed increases with score
-      double rotationSpeed = 0.08 + (score * 0.002);
-      shieldAngle += rotationSpeed * shieldRotationDirection;
+    final int score = _score.value;
 
-      // Dynamic Shield Width - Gets smaller as score increases
-      shieldWidth = (pi / 2) - (score * 0.01).clamp(0, pi / 4);
+    // Rotate shield
+    final double rotationSpeed = 0.08 + (score * 0.002);
+    shieldAngle += rotationSpeed * shieldRotationDirection;
 
-      // Update enemies
-      for (var enemy in enemies) {
-        // Base speed + acceleration based on score
-        enemy.distance -=
-            (2.0 + (score / 8) + (random.nextDouble() * (score / 20)));
+    // Dynamic shield width
+    shieldWidth = (pi / 2) - (score * 0.01).clamp(0, pi / 4);
+
+    // Move enemies
+    for (final enemy in enemies) {
+      enemy.distance -= (2.0 + (score / 8) + (random.nextDouble() * (score / 20)));
+    }
+
+    _checkCollisions();
+
+    // Spawn enemies
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs - _lastSpawnMs > spawnRate) {
+      enemies.add(Enemy(angle: random.nextDouble() * 2 * pi, distance: 400));
+
+      if (score >= 15 && random.nextDouble() < 0.2) {
+        enemies.add(Enemy(
+          angle: (enemies.last.angle + pi) % (2 * pi),
+          distance: 450,
+        ));
       }
 
-      // Check for collisions or score
-      _checkCollisions();
-
-      // Spawn enemies
-      if (lastSpawnTime == null ||
-          DateTime.now().difference(lastSpawnTime!).inMilliseconds >
-              spawnRate) {
-        enemies.add(Enemy(angle: random.nextDouble() * 2 * pi, distance: 400));
-
-        // Advanced mechanics: Spawn 2 enemies at once past score 15
-        if (score >= 15 && random.nextDouble() < 0.2) {
-          enemies.add(
-            Enemy(
-              angle: (enemies.last.angle + pi) % (2 * pi), // Opposite side
-              distance: 450,
-            ),
-          );
-        }
-
-        lastSpawnTime = DateTime.now();
-        // Faster spawn rate decay
-        if (spawnRate > 450) spawnRate -= 35;
-      }
-    });
+      _lastSpawnMs = nowMs;
+      if (spawnRate > 450) spawnRate -= 35;
+    }
   }
 
   void _checkCollisions() {
     final List<Enemy> toRemove = [];
-
-    for (var enemy in enemies) {
+    for (final enemy in enemies) {
       if (enemy.distance < 45) {
-        // Threshold for center interaction
-        // Check if shield blocks it
-        // Normalize angles to 0..2PI
         double normShield = shieldAngle % (2 * pi);
         double normEnemy = enemy.angle % (2 * pi);
-
-        // Simple angular distance check
         double diff = (normShield - normEnemy).abs();
         if (diff > pi) diff = 2 * pi - diff;
 
         if (diff < shieldWidth / 2) {
-          // Blocked!
-          score++;
+          _score.value++;
           toRemove.add(enemy);
           AudioManager().playSfx('hit.mp3');
         } else {
-          // Hit core!
           _gameOver();
-          break;
+          return;
         }
       }
     }
-
-    enemies.removeWhere((e) => toRemove.contains(e));
+    enemies.removeWhere(toRemove.contains);
   }
 
   void _gameOver() {
-    setState(() {
-      isGameOver = true;
-    });
+    _isGameOver.value = true;
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
-
-    // Persist score
-    DatabaseService(uid: widget.uid).updateScore('orbital', score);
+    DatabaseService(uid: widget.uid).updateScore('orbital', _score.value);
   }
 
   void _onTap() {
-    if (isPaused) return;
-    if (!isStarted || isGameOver) {
+    if (_isPaused.value) return;
+    if (!_isStarted.value || _isGameOver.value) {
       _startGame();
     } else {
-      setState(() {
-        shieldRotationDirection = -shieldRotationDirection;
-      });
-      AudioManager().playSfx(
-        'jump.mp3',
-      ); // Using jump sound for direction switch
+      shieldRotationDirection = -shieldRotationDirection;
+      AudioManager().playSfx('jump.mp3');
     }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _score.dispose();
+    _isGameOver.dispose();
+    _isStarted.dispose();
+    _isPaused.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final graphicsQuality = ref.watch(graphicsQualityProvider);
+
     return PopScope(
-      canPop: isGameOver || !isStarted,
+      canPop: _isGameOver.value || !_isStarted.value,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (isStarted && !isGameOver) {
-          setState(() {
-            isPaused = true;
-          });
-        }
+        if (_isStarted.value && !_isGameOver.value) _isPaused.value = true;
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D0D2B),
@@ -189,103 +156,115 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
           onTap: _onTap,
           child: Stack(
             children: [
-              CustomPaint(
-                painter: OrbitalPainter(
-                  shieldAngle: shieldAngle,
-                  shieldWidth: shieldWidth,
-                  enemies: enemies,
-                  isGameOver: isGameOver,
-                  graphicsQuality: _graphicsQuality,
-                ),
-                size: Size.infinite,
+              // ── Game Canvas ───────────────────────────────────────────────
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) {
+                  return RepaintBoundary(
+                    child: CustomPaint(
+                      painter: OrbitalPainter(
+                        shieldAngle: shieldAngle,
+                        shieldWidth: shieldWidth,
+                        enemies: enemies,
+                        isGameOver: _isGameOver.value,
+                        graphicsQuality: graphicsQuality,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  );
+                },
               ),
 
-              // Score
+              // ── Score ─────────────────────────────────────────────────────
               Positioned(
                 top: 60,
                 left: 0,
                 right: 0,
                 child: Center(
-                  child: Text(
-                    '$score',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      shadows: [
-                        Shadow(color: Colors.pinkAccent, blurRadius: 15),
-                      ],
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _score,
+                    builder: (context, score, _) => Text(
+                      '$score',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        shadows: [Shadow(color: Colors.pinkAccent, blurRadius: 15)],
+                      ),
                     ),
                   ),
                 ),
               ),
 
-              // Overlays
-              if (!isStarted || isGameOver)
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(30),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(200),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.pinkAccent.withAlpha(100),
-                        width: 2,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          isGameOver ? 'CORE BREACHED' : 'ORBITAL STRIKE',
-                          style: const TextStyle(
-                            color: Colors.pinkAccent,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 2,
+              // ── Start / Game-over overlay ─────────────────────────────────
+              ValueListenableBuilder<bool>(
+                valueListenable: _isStarted,
+                builder: (context, started, _) {
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: _isGameOver,
+                    builder: (context, gameOver, _) {
+                      if (started && !gameOver) return const SizedBox.shrink();
+                      return Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(30),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withAlpha(200),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: Colors.pinkAccent.withAlpha(100), width: 2),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                gameOver ? 'CORE BREACHED' : 'ORBITAL STRIKE',
+                                style: const TextStyle(
+                                  color: Colors.pinkAccent,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              if (gameOver)
+                                ValueListenableBuilder<int>(
+                                  valueListenable: _score,
+                                  builder: (context, score, _) => Text(
+                                    'Score: $score',
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 20),
+                                  ),
+                                ),
+                              const SizedBox(height: 20),
+                              Text(
+                                gameOver ? 'TAP TO RETRY' : 'TAP TO DEFEND',
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 16),
+                              ),
+                              const SizedBox(height: 10),
+                              const Text(
+                                'Tap to change shield direction',
+                                style:
+                                    TextStyle(color: Colors.white38, fontSize: 12),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        if (isGameOver)
-                          Text(
-                            'Score: $score',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                            ),
-                          ),
-                        const SizedBox(height: 20),
-                        Text(
-                          'TAP TO ${isGameOver ? 'RETRY' : 'DEFEND'}',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Tap to change shield direction',
-                          style: TextStyle(color: Colors.white38, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                      );
+                    },
+                  );
+                },
+              ),
 
-              // Back Button (At the end to be on top)
+              // ── Back Button ───────────────────────────────────────────────
               Positioned(
                 top: 50,
                 left: 20,
                 child: IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back_ios_new,
-                    color: Colors.white,
-                  ),
+                  icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
                   onPressed: () {
-                    if (isStarted && !isGameOver) {
-                      setState(() {
-                        isPaused = true;
-                      });
+                    if (_isStarted.value && !_isGameOver.value) {
+                      _isPaused.value = true;
                     } else {
                       Navigator.pop(context);
                     }
@@ -293,34 +272,32 @@ class _OrbitalStrikeGameState extends State<OrbitalStrikeGame>
                 ),
               ),
 
-              // Pause Menu Overlay
-              if (isPaused)
-                PauseOverlay(
-                  onResume: () {
-                    setState(() {
-                      isPaused = false;
-                    });
-                  },
-                  onHome: () {
-                    Navigator.pop(context);
-                  },
-                  onToggleMusic: () {
-                    setState(() {
-                      AudioManager().toggleMusic(
-                        !AudioManager().isMusicEnabled,
-                      );
-                    });
-                  },
-                  onToggleSfx: () {
-                    setState(() {
-                      AudioManager().toggleSfx(!AudioManager().isSfxEnabled);
-                    });
-                  },
-                  onToggleGraphics: _cycleGraphics,
-                  isMusicEnabled: AudioManager().isMusicEnabled,
-                  isSfxEnabled: AudioManager().isSfxEnabled,
-                  graphicsQuality: _graphicsQuality,
-                ),
+              // ── Pause overlay ─────────────────────────────────────────────
+              ValueListenableBuilder<bool>(
+                valueListenable: _isPaused,
+                builder: (context, paused, _) {
+                  if (!paused) return const SizedBox.shrink();
+                  return PauseOverlay(
+                    onResume: () => _isPaused.value = false,
+                    onHome: () => Navigator.pop(context),
+                    onToggleMusic: () {
+                      final enabled = !AudioManager().isMusicEnabled;
+                      AudioManager().toggleMusic(enabled);
+                      ref.read(musicEnabledProvider.notifier).setValue(enabled);
+                    },
+                    onToggleSfx: () {
+                      final enabled = !AudioManager().isSfxEnabled;
+                      AudioManager().toggleSfx(enabled);
+                      ref.read(sfxEnabledProvider.notifier).setValue(enabled);
+                    },
+                    onToggleGraphics: () =>
+                        ref.read(graphicsQualityProvider.notifier).cycle(),
+                    isMusicEnabled: ref.read(musicEnabledProvider),
+                    isSfxEnabled: ref.read(sfxEnabledProvider),
+                    graphicsQuality: graphicsQuality,
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -342,6 +319,16 @@ class OrbitalPainter extends CustomPainter {
   final bool isGameOver;
   final GraphicsQuality graphicsQuality;
 
+  // ── Cached Paint objects ──────────────────────────────────────────────────
+  static final Paint _ringPaint = Paint()
+    ..color = Colors.white.withAlpha(10)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1;
+
+  static final Paint _coreWhite = Paint()..color = Colors.white;
+
+  static final Paint _enemyCore = Paint()..color = Colors.white;
+
   OrbitalPainter({
     required this.shieldAngle,
     required this.shieldWidth,
@@ -354,25 +341,16 @@ class OrbitalPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
 
-    // Draw Background Grid/Rings
-    final ringPaint = Paint()
-      ..color = Colors.white.withAlpha(10)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
+    // Background rings
     for (int i = 1; i <= 4; i++) {
-      canvas.drawCircle(center, i * 100.0, ringPaint);
+      canvas.drawCircle(center, i * 100.0, _ringPaint);
     }
 
-    // Draw Core
-    final corePaint = Paint()
-      ..color = isGameOver ? Colors.red : Colors.pinkAccent;
-
+    // Core
+    final corePaint = Paint()..color = isGameOver ? Colors.red : Colors.pinkAccent;
     if (graphicsQuality != GraphicsQuality.low) {
-      corePaint.maskFilter = MaskFilter.blur(
-        BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 15 : 10,
-      );
+      corePaint.maskFilter = MaskFilter.blur(BlurStyle.normal,
+          graphicsQuality == GraphicsQuality.high ? 15 : 10);
       if (graphicsQuality == GraphicsQuality.high) {
         canvas.drawCircle(
           center,
@@ -383,11 +361,10 @@ class OrbitalPainter extends CustomPainter {
         );
       }
     }
-
     canvas.drawCircle(center, 25, corePaint);
-    canvas.drawCircle(center, 15, Paint()..color = Colors.white);
+    canvas.drawCircle(center, 15, _coreWhite);
 
-    // Draw Shield
+    // Shield
     final shieldPaint = Paint()
       ..color = Colors.cyanAccent
       ..style = PaintingStyle.stroke
@@ -395,12 +372,9 @@ class OrbitalPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     if (graphicsQuality != GraphicsQuality.low) {
-      shieldPaint.maskFilter = MaskFilter.blur(
-        BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 8 : 5,
-      );
+      shieldPaint.maskFilter = MaskFilter.blur(BlurStyle.normal,
+          graphicsQuality == GraphicsQuality.high ? 8 : 5);
       if (graphicsQuality == GraphicsQuality.high) {
-        // extra shield glow
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: 45),
           shieldAngle - shieldWidth / 2,
@@ -424,7 +398,7 @@ class OrbitalPainter extends CustomPainter {
       shieldPaint,
     );
 
-    // Shield Inner Line
+    // Shield inner line
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: 45),
       shieldAngle - shieldWidth / 2,
@@ -437,23 +411,19 @@ class OrbitalPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
 
-    // Draw Enemies
+    // Enemies
     final enemyPaint = Paint()..color = Colors.amberAccent;
     if (graphicsQuality != GraphicsQuality.low) {
-      enemyPaint.maskFilter = MaskFilter.blur(
-        BlurStyle.normal,
-        graphicsQuality == GraphicsQuality.high ? 6 : 4,
-      );
+      enemyPaint.maskFilter = MaskFilter.blur(BlurStyle.normal,
+          graphicsQuality == GraphicsQuality.high ? 6 : 4);
     }
 
-    for (var enemy in enemies) {
-      double ex = center.dx + cos(enemy.angle) * enemy.distance;
-      double ey = center.dy + sin(enemy.angle) * enemy.distance;
-
+    for (final enemy in enemies) {
+      final ex = center.dx + cos(enemy.angle) * enemy.distance;
+      final ey = center.dy + sin(enemy.angle) * enemy.distance;
       canvas.drawCircle(Offset(ex, ey), 8, enemyPaint);
-      canvas.drawCircle(Offset(ex, ey), 4, Paint()..color = Colors.white);
+      canvas.drawCircle(Offset(ex, ey), 4, _enemyCore);
 
-      // Tail effect
       canvas.drawLine(
         Offset(ex, ey),
         Offset(
@@ -468,5 +438,11 @@ class OrbitalPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant OrbitalPainter oldDelegate) => true;
+  bool shouldRepaint(covariant OrbitalPainter old) {
+    return old.shieldAngle != shieldAngle ||
+        old.shieldWidth != shieldWidth ||
+        old.isGameOver != isGameOver ||
+        old.graphicsQuality != graphicsQuality ||
+        old.enemies.length != enemies.length;
+  }
 }

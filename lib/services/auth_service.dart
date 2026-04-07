@@ -50,7 +50,7 @@ class AuthService {
       }
       return _auth.currentUser;
     } catch (e) {
-      print("AuthService: Silent initialization failed: $e");
+      if (kDebugMode) debugPrint("AuthService: Silent initialization failed: $e");
       return _auth.currentUser;
     }
   }
@@ -79,7 +79,7 @@ class AuthService {
       }
       return user;
     } catch (e) {
-      print("AuthService: Google Master sign-in failed: $e");
+      if (kDebugMode) debugPrint("AuthService: Google Master sign-in failed: $e");
       return null;
     } finally {
       isSyncingProfile.value = false;
@@ -109,7 +109,7 @@ class AuthService {
           await GamesServices.signIn();
           pgsAccount = await googleSignInGames.signIn();
         } catch (e) {
-          print("AuthService: Silent-ish PGS selection fail: $e");
+          if (kDebugMode) debugPrint("AuthService: Silent-ish PGS selection fail: $e");
         }
       }
 
@@ -126,7 +126,7 @@ class AuthService {
         }
       }
     } catch (e) {
-      print("AuthService: PGS Sync Error: $e");
+      if (kDebugMode) debugPrint("AuthService: PGS Sync Error: $e");
     }
   }
 
@@ -136,7 +136,7 @@ class AuthService {
       await GoogleSignIn().signOut();
       isPgsLinked.value = false;
     } catch (e) {
-      print("Sign out error: $e");
+      if (kDebugMode) debugPrint("Sign out error: $e");
     }
   }
 }

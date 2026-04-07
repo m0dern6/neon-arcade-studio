@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DatabaseService {
@@ -20,6 +21,16 @@ class DatabaseService {
   static const String _pendingPrefix = 'pending_scores_';
   static const String _guestScoresKey = 'guest_best_scores';
   static const int _maxRetryDelaySeconds = 60;
+
+  /// Cached SharedPreferences instance – initialised once and reused so that
+  /// every read/write does not pay the [SharedPreferences.getInstance] async
+  /// overhead on low-end devices.
+  static SharedPreferences? _prefs;
+
+  static Future<SharedPreferences> _getPrefs() async {
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
+  }
 
   DatabaseService({this.uid});
 
@@ -78,7 +89,7 @@ class DatabaseService {
       }
     } catch (e) {
       await _savePendingScore(gameId, localBest);
-      print('Error updating score, saved for sync: $e');
+      if (kDebugMode) debugPrint('Error updating score, saved for sync: $e');
       _scheduleRetrySync();
     }
   }
@@ -115,13 +126,13 @@ class DatabaseService {
         await batch.commit();
       } else {
         // Account exists: Discard guest scores as per user request
-        print("Account already has scores. Discarding local guest scores.");
+        if (kDebugMode) debugPrint("Account already has scores. Discarding local guest scores.");
       }
 
       // In both cases, clear the guest pool once we've crossed the "login" threshold
       await _clearGuestScores();
     } catch (e) {
-      print("Migration failed: $e");
+      if (kDebugMode) debugPrint("Migration failed: $e");
     }
   }
 
@@ -187,7 +198,7 @@ class DatabaseService {
       }
       return localBest;
     } catch (e) {
-      print("Error getting best score: $e");
+      if (kDebugMode) debugPrint("Error getting best score: $e");
       final localScores = await getCachedBestScores();
       return localScores[gameId] ?? 0;
     }
@@ -246,7 +257,7 @@ class DatabaseService {
   }
 
   Future<void> _clearGuestScores() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     await prefs.remove(_guestScoresKey);
   }
 
@@ -266,7 +277,7 @@ class DatabaseService {
   }
 
   Future<Map<String, int>> _readIntMap(String key) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     final raw = prefs.getString(key);
     if (raw == null || raw.isEmpty) return {};
 
@@ -284,7 +295,7 @@ class DatabaseService {
   }
 
   Future<void> _writeIntMap(String key, Map<String, int> value) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     await prefs.setString(key, jsonEncode(value));
   }
 
