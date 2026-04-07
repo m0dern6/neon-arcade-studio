@@ -11,6 +11,8 @@ class SettingsManager {
 
   SettingsManager._internal();
 
+  // Default to low until init() completes; also acts as a safe fallback for
+  // any synchronous access that might happen before the async init finishes.
   GraphicsQuality _graphicsQuality = GraphicsQuality.low;
 
   GraphicsQuality get graphicsQuality => _graphicsQuality;
@@ -34,24 +36,18 @@ class SettingsManager {
     await prefs.setInt('graphics_quality', quality.index);
   }
 
-  /// Returns a safe default based on the device's available memory.
-  /// Falls back to [GraphicsQuality.low] on low-RAM or unknown devices.
+  /// Returns a safe default based on the platform.
+  /// On Android (the most common low-end target), we default to [GraphicsQuality.low]
+  /// to ensure smooth gameplay on devices like the Samsung Galaxy A20.
+  /// Users can always raise the quality through the in-game pause menu.
   static GraphicsQuality _detectDefaultQuality() {
     try {
       if (!kIsWeb && Platform.isAndroid) {
-        // ProcessInfo.currentRss gives the resident set size of the Dart VM in
-        // bytes. On a 3 GB device the full process overhead leaves very little
-        // headroom, so we stay on low graphics to avoid jank.
-        final rss = ProcessInfo.currentRss;
-        // <  80 MB already used → plenty of room → medium
-        // >= 80 MB already used → conserve resources → low
-        if (rss < 80 * 1024 * 1024) {
-          return GraphicsQuality.medium;
-        }
+        return GraphicsQuality.low;
       }
     } catch (_) {
       // Ignore; keep low as a safe default.
     }
-    return GraphicsQuality.low;
+    return GraphicsQuality.medium;
   }
 }

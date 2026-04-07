@@ -103,6 +103,7 @@ class _CyberSliceGameState extends ConsumerState<CyberSliceGame>
       type: random.nextDouble() < 0.15 ? NodeType.bomb : NodeType.shape,
       shape: ShapeType.values[random.nextInt(ShapeType.values.length)],
       color: _getRandomNeonColor(),
+      random: random,
     ));
   }
 
@@ -378,7 +379,8 @@ class SliceNode {
     required this.type,
     required this.shape,
     required this.color,
-  }) : rotationSpeed = (Random().nextDouble() - 0.5) * 0.2;
+    required Random random,
+  }) : rotationSpeed = (random.nextDouble() - 0.5) * 0.2;
 
   void update() {
     position += velocity;
