@@ -95,7 +95,10 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
     if (nowMs - _lastMoveMs < _moveInterval) return;
     _lastMoveMs = nowMs;
 
-    // Apply queued direction (disallow 180° reversal)
+    // Apply queued direction.
+    // If the x/y components sum to 0 the new direction is exactly opposite
+    // (e.g. moving right and queued left), which would crash the snake into
+    // itself — so we only accept the turn when the sum is non-zero.
     if (_nextDirection.x + _direction.x != 0 ||
         _nextDirection.y + _direction.y != 0) {
       _direction = _nextDirection;

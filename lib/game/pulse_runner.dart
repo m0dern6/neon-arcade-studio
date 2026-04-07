@@ -29,6 +29,10 @@ class _PulseRunnerGameState extends ConsumerState<PulseRunnerGame>
   static const double _gravity = 0.7;
   static const double _jumpVelocity = -13.0;
   static const double _groundFraction = 0.75;
+  static const double _baseSpawnInterval = 1600;
+  static const double _baseSpeed = 5.0;
+  static const double _minSpawnInterval = 600;
+  static const double _maxSpawnInterval = 2200;
 
   // ── Game state ────────────────────────────────────────────────────────────
   double _playerY = 0;
@@ -113,7 +117,9 @@ class _PulseRunnerGameState extends ConsumerState<PulseRunnerGame>
 
     // Spawn obstacles
     final int nowMs = DateTime.now().millisecondsSinceEpoch;
-    final double spawnInterval = (1600 / (_speed / 5)).clamp(600, 2200);
+    final double spawnInterval =
+        (_baseSpawnInterval / (_speed / _baseSpeed))
+            .clamp(_minSpawnInterval, _maxSpawnInterval);
     if (nowMs - _lastSpawnMs > spawnInterval) {
       final double h = 30 + _random.nextDouble() * 44;
       _obstacles.add(_RunnerObstacle(

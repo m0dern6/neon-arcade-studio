@@ -23,14 +23,21 @@ class _HyperTapGameState extends ConsumerState<HyperTapGame>
   double _screenWidth = 0;
   double _screenHeight = 0;
 
+  // ── Game constants ────────────────────────────────────────────────────────
+  static const int _maxLives = 3;
+  static const double _initialLifespan = 2000;
+  static const double _lifespanDecreasePerPoint = 4.0;
+  static const double _minLifespan = 700;
+  static const double _initialSpawnInterval = 1200;
+
   // ── Game state ────────────────────────────────────────────────────────────
   List<_TapTarget> _targets = [];
-  int _lives = 3;
-  double _spawnInterval = 1200;
+  int _lives = _maxLives;
+  double _spawnInterval = _initialSpawnInterval;
   int _lastSpawnMs = 0;
 
   final ValueNotifier<int> _score = ValueNotifier(0);
-  final ValueNotifier<int> _livesNotifier = ValueNotifier(3);
+  final ValueNotifier<int> _livesNotifier = ValueNotifier(_maxLives);
   final ValueNotifier<bool> _isGameOver = ValueNotifier(false);
   final ValueNotifier<bool> _isStarted = ValueNotifier(false);
   final ValueNotifier<bool> _isPaused = ValueNotifier(false);
@@ -56,12 +63,12 @@ class _HyperTapGameState extends ConsumerState<HyperTapGame>
 
   void _startGame() {
     _score.value = 0;
-    _lives = 3;
-    _livesNotifier.value = 3;
+    _lives = _maxLives;
+    _livesNotifier.value = _maxLives;
     _isGameOver.value = false;
     _isStarted.value = true;
     _targets = [];
-    _spawnInterval = 1200;
+    _spawnInterval = _initialSpawnInterval;
     _lastSpawnMs = DateTime.now().millisecondsSinceEpoch;
     AudioManager().playSfx('start.mp3');
     _controller.repeat();
@@ -96,7 +103,8 @@ class _HyperTapGameState extends ConsumerState<HyperTapGame>
     if (nowMs - _lastSpawnMs > _spawnInterval) {
       const double padding = 70;
       final double lifespan =
-          (2000 - _score.value * 4.0).clamp(700, 2000);
+          (_initialLifespan - _score.value * _lifespanDecreasePerPoint)
+              .clamp(_minLifespan, _initialLifespan);
       _targets.add(_TapTarget(
         pos: Offset(
           padding + _random.nextDouble() * (_screenWidth - padding * 2),
