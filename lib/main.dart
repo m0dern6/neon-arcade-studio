@@ -13,7 +13,8 @@ import 'game/audio_manager.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Set up Edge-to-Edge for Android 15 and iOS
+  // Enable edge-to-edge so the app draws behind the status and navigation bars
+  // on all Android versions (API 21+) and iOS.
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     systemNavigationBarIconBrightness: Brightness.light,
