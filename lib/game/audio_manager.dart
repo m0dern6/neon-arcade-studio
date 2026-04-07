@@ -1,4 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 
 class AudioManager {
   static final AudioManager _instance = AudioManager._internal();
@@ -51,7 +52,7 @@ class AudioManager {
       await _musicPlayer.setReleaseMode(ReleaseMode.loop);
       await _musicPlayer.play(AssetSource('audio/$fileName'));
     } catch (e) {
-      print("Error playing music: $e");
+      if (kDebugMode) debugPrint("Error playing music: $e");
     }
   }
 
@@ -84,7 +85,7 @@ class AudioManager {
 
       await player.play(AssetSource('audio/$fileName'), volume: 0.5);
     } catch (e) {
-      print("Error playing SFX: $e");
+      if (kDebugMode) debugPrint("Error playing SFX: $e");
     }
   }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -25,6 +26,60 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
   final AuthService _authService = AuthService();
   Map<String, int> localBestScores = {};
   StreamSubscription<User?>? _authSubscription;
+
+  // ── Game widget cache ─────────────────────────────────────────────────────
+  // Game widgets are expensive to create and must not be re-instantiated on
+  // every stream update. We cache them and only rebuild when the UID changes.
+  String? _cachedUid;
+  List<GameMetadata>? _cachedGames;
+
+  List<GameMetadata> _getGames(String? uid) {
+    if (_cachedGames != null && _cachedUid == uid) return _cachedGames!;
+    _cachedUid = uid;
+    _cachedGames = [
+      GameMetadata(
+        id: 'neon_gravity',
+        title: 'Neon Gravity',
+        description: 'Defy gravity in a high-speed neon runner.',
+        icon: Icons.unfold_more,
+        themeColor: Colors.cyanAccent,
+        gameWidget: NeonGravityGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'orbital',
+        title: 'Orbital Strike',
+        description: 'Defend the core from circular threats.',
+        icon: Icons.blur_circular,
+        themeColor: Colors.pinkAccent,
+        gameWidget: OrbitalStrikeGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'pulse_dash',
+        title: 'Cyber Slice',
+        description: 'Slice the neon cores and avoid data bombs.',
+        icon: Icons.content_cut,
+        themeColor: Colors.cyanAccent,
+        gameWidget: CyberSliceGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'cyber_stack',
+        title: 'Cyber Stack',
+        description: 'Stack the blocks with perfect precision.',
+        icon: Icons.layers,
+        themeColor: Colors.purpleAccent,
+        gameWidget: CyberStackGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'vector_void',
+        title: 'Vector Void',
+        description: 'Dodge the incoming geometric vectors.',
+        icon: Icons.change_history,
+        themeColor: Colors.greenAccent,
+        gameWidget: VectorVoidGame(uid: uid),
+      ),
+    ];
+    return _cachedGames!;
+  }
 
   @override
   void initState() {
@@ -71,7 +126,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
         });
       }
     } catch (e) {
-      print("Auto sign-in failed: $e");
+      if (kDebugMode) debugPrint("Auto sign-in failed: $e");
     }
   }
 
@@ -364,11 +419,13 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
       stream: _authService.user,
       builder: (context, authSnapshot) {
         final user = authSnapshot.data;
-        if (user != null) {
-          print("StudioHomeScreen: Building UI for User: ${user.uid}");
-          print("StudioHomeScreen: User Data -> Name: ${user.displayName}, Photo: ${user.photoURL}");
-        } else {
-          print("StudioHomeScreen: Building UI for Guest Mode");
+        if (kDebugMode) {
+          if (user != null) {
+            debugPrint("StudioHomeScreen: Building UI for User: ${user.uid}");
+            debugPrint("StudioHomeScreen: User Data -> Name: ${user.displayName}, Photo: ${user.photoURL}");
+          } else {
+            debugPrint("StudioHomeScreen: Building UI for Guest Mode");
+          }
         }
 
         return StreamBuilder<Map<String, dynamic>>(
@@ -392,48 +449,7 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
 
             final String? currentUid = user?.uid;
 
-            final List<GameMetadata> games = [
-              GameMetadata(
-                id: 'neon_gravity',
-                title: 'Neon Gravity',
-                description: 'Defy gravity in a high-speed neon runner.',
-                icon: Icons.unfold_more,
-                themeColor: Colors.cyanAccent,
-                gameWidget: NeonGravityGame(uid: currentUid),
-              ),
-              GameMetadata(
-                id: 'orbital',
-                title: 'Orbital Strike',
-                description: 'Defend the core from circular threats.',
-                icon: Icons.blur_circular,
-                themeColor: Colors.pinkAccent,
-                gameWidget: OrbitalStrikeGame(uid: currentUid),
-              ),
-              GameMetadata(
-                id: 'pulse_dash', // Keeping ID same for score compatibility
-                title: 'Cyber Slice',
-                description: 'Slice the neon cores and avoid data bombs.',
-                icon: Icons.content_cut,
-                themeColor: Colors.cyanAccent,
-                gameWidget: CyberSliceGame(uid: currentUid),
-              ),
-              GameMetadata(
-                id: 'cyber_stack',
-                title: 'Cyber Stack',
-                description: 'Stack the blocks with perfect precision.',
-                icon: Icons.layers,
-                themeColor: Colors.purpleAccent,
-                gameWidget: CyberStackGame(uid: currentUid),
-              ),
-              GameMetadata(
-                id: 'vector_void',
-                title: 'Vector Void',
-                description: 'Dodge the incoming geometric vectors.',
-                icon: Icons.change_history,
-                themeColor: Colors.greenAccent,
-                gameWidget: VectorVoidGame(uid: currentUid),
-              ),
-            ];
+            final List<GameMetadata> games = _getGames(currentUid);
 
             return Scaffold(
               body: Container(

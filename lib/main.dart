@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/studio_home.dart';
 import 'screens/splash_screen.dart';
 import 'services/database_service.dart';
@@ -27,7 +28,7 @@ void main() async {
   );
   await DatabaseService.initializeSync();
   await SettingsManager().init();
-  runApp(const NeonApp());
+  runApp(const ProviderScope(child: NeonApp()));
 }
 
 class NeonApp extends StatefulWidget {
