@@ -11,6 +11,11 @@ import '../game/orbital_strike.dart';
 import '../game/cyber_slice.dart';
 import '../game/cyber_stack.dart';
 import '../game/vector_void.dart';
+import '../game/pixel_pong.dart';
+import '../game/neon_snake.dart';
+import '../game/pulse_runner.dart';
+import '../game/hyper_tap.dart';
+import '../game/neon_bounce.dart';
 import '../game/audio_manager.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
@@ -76,6 +81,46 @@ class _StudioHomeScreenState extends State<StudioHomeScreen> {
         icon: Icons.change_history,
         themeColor: Colors.greenAccent,
         gameWidget: VectorVoidGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'pixel_pong',
+        title: 'Pixel Pong',
+        description: 'Beat the AI paddle in neon-lit pong.',
+        icon: Icons.sports_tennis,
+        themeColor: Colors.yellowAccent,
+        gameWidget: PixelPongGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'neon_snake',
+        title: 'Neon Snake',
+        description: 'Swipe to steer. Eat orbs, grow, survive.',
+        icon: Icons.linear_scale,
+        themeColor: Colors.limeAccent,
+        gameWidget: NeonSnakeGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'pulse_runner',
+        title: 'Pulse Runner',
+        description: 'Tap to jump and outrun the neon storm.',
+        icon: Icons.directions_run,
+        themeColor: Colors.orangeAccent,
+        gameWidget: PulseRunnerGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'hyper_tap',
+        title: 'Hyper Tap',
+        description: 'Tap the shrinking circles before they vanish.',
+        icon: Icons.touch_app,
+        themeColor: Colors.amberAccent,
+        gameWidget: HyperTapGame(uid: uid),
+      ),
+      GameMetadata(
+        id: 'neon_bounce',
+        title: 'Neon Bounce',
+        description: 'Break every neon brick with your paddle.',
+        icon: Icons.sports_basketball,
+        themeColor: Colors.deepPurpleAccent,
+        gameWidget: NeonBounceGame(uid: uid),
       ),
     ];
     return _cachedGames!;
