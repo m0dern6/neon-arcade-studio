@@ -34,7 +34,10 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
   Point<int> _direction = const Point(1, 0);
   Point<int> _nextDirection = const Point(1, 0);
   int _lastMoveMs = 0;
-  int _moveInterval = 200; // ms between steps
+  int _moveInterval = 200; // ms between grid steps
+
+  // Smooth interpolation: fraction (0-1) between the last step and the next
+  double _stepFraction = 0.0;
 
   final ValueNotifier<int> _score = ValueNotifier(0);
   final ValueNotifier<bool> _isGameOver = ValueNotifier(false);
@@ -69,6 +72,7 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
     _direction = const Point(1, 0);
     _nextDirection = const Point(1, 0);
     _moveInterval = 200;
+    _stepFraction = 0.0;
     _spawnFood();
     _lastMoveMs = DateTime.now().millisecondsSinceEpoch;
     AudioManager().playSfx('start.mp3');
@@ -87,13 +91,16 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
     if (_isGameOver.value || !_isStarted.value || _isPaused.value) return;
 
     final int nowMs = DateTime.now().millisecondsSinceEpoch;
-    if (nowMs - _lastMoveMs < _moveInterval) return;
-    _lastMoveMs = nowMs;
+    final int elapsed = nowMs - _lastMoveMs;
 
-    // Apply queued direction.
-    // If the x/y components sum to 0 the new direction is exactly opposite
-    // (e.g. moving right and queued left), which would crash the snake into
-    // itself — so we only accept the turn when the sum is non-zero.
+    // Update smooth interpolation fraction (drives animation between steps)
+    _stepFraction = (elapsed / _moveInterval).clamp(0.0, 1.0);
+
+    if (elapsed < _moveInterval) return; // not yet time for next grid step
+    _lastMoveMs = nowMs;
+    _stepFraction = 0.0;
+
+    // Apply queued direction (prevent 180° reversal)
     if (_nextDirection.x + _direction.x != 0 ||
         _nextDirection.y + _direction.y != 0) {
       _direction = _nextDirection;
@@ -196,6 +203,8 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
                           rows: _rows,
                           isGameOver: _isGameOver.value,
                           graphicsQuality: graphicsQuality,
+                          stepFraction: _stepFraction,
+                          direction: _direction,
                         ),
                         size: Size.infinite,
                       ),
@@ -354,6 +363,9 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Snake Painter — smooth movement + realistic snake appearance
+// ─────────────────────────────────────────────────────────────────────────────
 class SnakePainter extends CustomPainter {
   final List<Point<int>> snake;
   final Point<int> food;
@@ -362,6 +374,8 @@ class SnakePainter extends CustomPainter {
   final int rows;
   final bool isGameOver;
   final GraphicsQuality graphicsQuality;
+  final double stepFraction;
+  final Point<int> direction;
 
   SnakePainter({
     required this.snake,
@@ -371,56 +385,293 @@ class SnakePainter extends CustomPainter {
     required this.rows,
     required this.isGameOver,
     required this.graphicsQuality,
+    required this.stepFraction,
+    required this.direction,
   });
+
+  // Center of a grid cell in pixel space
+  Offset _gridCenter(Point<int> p) =>
+      Offset((p.x + 0.5) * cellSize, (p.y + 0.5) * cellSize);
+
+  // True when two grid points are on opposite sides of a wrap boundary
+  bool _isWrapping(Point<int> a, Point<int> b) =>
+      (a.x - b.x).abs() > cols ~/ 2 || (a.y - b.y).abs() > rows ~/ 2;
+
+  // Compute smooth pixel positions for every snake segment
+  List<Offset> _computePositions() {
+    final List<Offset> out = [];
+    for (int i = 0; i < snake.length; i++) {
+      if (i == 0) {
+        // Head moves from its current cell toward the next cell
+        final from = _gridCenter(snake[0]);
+        final nextGrid = Point(
+          (snake[0].x + direction.x + cols) % cols,
+          (snake[0].y + direction.y + rows) % rows,
+        );
+        if (_isWrapping(snake[0], nextGrid)) {
+          out.add(from);
+        } else {
+          out.add(Offset.lerp(from, _gridCenter(nextGrid), stepFraction)!);
+        }
+      } else {
+        // Each body segment follows the one ahead of it
+        final behind = _gridCenter(snake[i]);
+        final ahead = _gridCenter(snake[i - 1]);
+        if (_isWrapping(snake[i], snake[i - 1])) {
+          out.add(behind);
+        } else {
+          out.add(Offset.lerp(behind, ahead, stepFraction)!);
+        }
+      }
+    }
+    return out;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Crisp neon shapes with no blur so the snake stays sharp.
-    final snakeColor = isGameOver ? Colors.redAccent : Colors.cyanAccent;
-    final bodyColor = Colors.greenAccent;
-    final borderColor = isGameOver ? Colors.orangeAccent : Colors.limeAccent;
+    if (snake.isEmpty) return;
 
-    final foodRect = Rect.fromCenter(
-      center: Offset((food.x + 0.5) * cellSize, (food.y + 0.5) * cellSize),
-      width: cellSize * 0.55,
-      height: cellSize * 0.55,
+    final positions = _computePositions();
+    final r = cellSize * 0.38; // body half-width
+
+    _drawFood(canvas);
+    _drawBody(canvas, positions, r);
+    if (positions.length >= 2) _drawTail(canvas, positions, r);
+    _drawHead(canvas, positions, r);
+  }
+
+  // ── Food ──────────────────────────────────────────────────────────────────
+  void _drawFood(Canvas canvas) {
+    final center =
+        Offset((food.x + 0.5) * cellSize, (food.y + 0.5) * cellSize);
+    final fr = cellSize * 0.3;
+
+    if (graphicsQuality != GraphicsQuality.low) {
+      canvas.drawCircle(
+        center,
+        fr * 2.0,
+        Paint()
+          ..color = Colors.pinkAccent.withAlpha(55)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+    }
+    canvas.drawCircle(center, fr, Paint()..color = Colors.pinkAccent);
+    // Highlight
+    canvas.drawCircle(
+      center - Offset(fr * 0.28, fr * 0.28),
+      fr * 0.32,
+      Paint()..color = Colors.white.withAlpha(200),
     );
-    final foodFill = Paint()..color = Colors.pinkAccent;
-    final foodStroke = Paint()
-      ..color = Colors.white
+  }
+
+  // ── Body ──────────────────────────────────────────────────────────────────
+  void _drawBody(Canvas canvas, List<Offset> positions, double r) {
+    if (positions.length < 2) return;
+
+    const baseColor = Color(0xFF1A5E20);
+    const darkColor = Color(0xFF0D3311);
+    final scaleColor =
+        isGameOver ? Colors.orangeAccent : Colors.limeAccent;
+    final tubeColor = isGameOver ? const Color(0xFF8B0000) : baseColor;
+
+    // Connecting tubes (drawn before circles so circles sit on top)
+    final tubePaint = Paint()
+      ..color = tubeColor
+      ..strokeWidth = r * 1.75
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 1; i < positions.length; i++) {
+      canvas.drawLine(positions[i], positions[i - 1], tubePaint);
+    }
+
+    // Segment circles with scale detail (tail → neck)
+    for (int i = positions.length - 1; i >= 1; i--) {
+      final isTail = i == positions.length - 1;
+      final segR = isTail ? r * 0.5 : r * 0.9;
+
+      // Darken toward the tail for depth
+      final t = positions.length > 2
+          ? i / (positions.length - 1).toDouble()
+          : 0.0;
+      final segColor = isGameOver
+          ? Color.lerp(const Color(0xFF8B0000), const Color(0xFF5C0000), t)!
+          : Color.lerp(baseColor, darkColor, t)!;
+
+      canvas.drawCircle(positions[i], segR, Paint()..color = segColor);
+
+      // Scale arcs on non-tail, non-neck segments
+      if (!isTail && i < positions.length - 1) {
+        _drawScaleArcs(
+          canvas,
+          positions[i],
+          positions[i - 1],
+          positions[i + 1],
+          segR,
+          scaleColor,
+        );
+      }
+    }
+  }
+
+  // Small arcs on each body segment to suggest scales
+  void _drawScaleArcs(
+    Canvas canvas,
+    Offset pos,
+    Offset ahead,
+    Offset behind,
+    double r,
+    Color scaleColor,
+  ) {
+    final forward = ahead - behind;
+    final dist = forward.distance;
+    if (dist < 0.001) return;
+    final norm = forward / dist;
+
+    final scalePaint = Paint()
+      ..color = scaleColor.withAlpha(80)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(foodRect, const Radius.circular(4)),
-      foodFill,
+      ..strokeWidth = 0.9;
+
+    canvas.save();
+    canvas.translate(pos.dx, pos.dy);
+    canvas.rotate(atan2(norm.dy, norm.dx));
+
+    // Two scale arcs per segment (top and bottom)
+    canvas.drawArc(
+      Rect.fromCenter(
+          center: Offset(0, -r * 0.38), width: r * 1.5, height: r * 0.95),
+      pi * 0.15,
+      pi * 0.7,
+      false,
+      scalePaint,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(foodRect.inflate(1.5), const Radius.circular(5)),
-      foodStroke,
+    canvas.drawArc(
+      Rect.fromCenter(
+          center: Offset(0, r * 0.38), width: r * 1.5, height: r * 0.95),
+      -pi * 0.85,
+      pi * 0.7,
+      false,
+      scalePaint,
+    );
+    canvas.restore();
+  }
+
+  // ── Pointed tail ─────────────────────────────────────────────────────────
+  void _drawTail(Canvas canvas, List<Offset> positions, double r) {
+    final tail = positions.last;
+    final preTail = positions[positions.length - 2];
+    final dir = tail - preTail;
+    final dist = dir.distance;
+    if (dist < 0.001) return;
+
+    final norm = dir / dist;
+    final perp = Offset(-norm.dy, norm.dx);
+    final tailColor =
+        isGameOver ? const Color(0xFF8B0000) : const Color(0xFF1A5E20);
+
+    final path = Path()
+      ..moveTo((tail + norm * r * 1.1).dx, (tail + norm * r * 1.1).dy)
+      ..lineTo(
+          (tail - norm * r * 0.2 + perp * r * 0.5).dx,
+          (tail - norm * r * 0.2 + perp * r * 0.5).dy)
+      ..lineTo(
+          (tail - norm * r * 0.2 - perp * r * 0.5).dx,
+          (tail - norm * r * 0.2 - perp * r * 0.5).dy)
+      ..close();
+
+    canvas.drawPath(path, Paint()..color = tailColor);
+  }
+
+  // ── Head with eyes, tongue, nostrils ────────────────────────────────────
+  void _drawHead(Canvas canvas, List<Offset> positions, double r) {
+    final headPos = positions[0];
+    final dirNorm =
+        Offset(direction.x.toDouble(), direction.y.toDouble());
+    final perpDir = Offset(-dirNorm.dy, dirNorm.dx);
+
+    final headColor =
+        isGameOver ? Colors.redAccent : Colors.cyanAccent;
+    final headDark =
+        isGameOver ? const Color(0xFF8B0000) : const Color(0xFF005522);
+    final headR = r * 1.15;
+
+    // Soft glow behind the head
+    if (graphicsQuality != GraphicsQuality.low) {
+      canvas.drawCircle(
+        headPos,
+        headR * 1.6,
+        Paint()
+          ..color = headColor.withAlpha(35)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+    }
+
+    // Head shape — elongated oval in movement direction
+    canvas.save();
+    canvas.translate(headPos.dx, headPos.dy);
+    canvas.rotate(atan2(dirNorm.dy, dirNorm.dx));
+
+    // Shadow/dark base
+    canvas.drawOval(
+      Rect.fromCenter(
+          center: Offset.zero, width: headR * 2.3, height: headR * 1.8),
+      Paint()..color = headDark,
+    );
+    // Bright overlay
+    canvas.drawOval(
+      Rect.fromCenter(
+          center: Offset(headR * 0.05, 0),
+          width: headR * 2.1,
+          height: headR * 1.65),
+      Paint()..color = headColor,
     );
 
-    for (int i = 0; i < snake.length; i++) {
-      final seg = snake[i];
-      final isHead = i == 0;
-      final segRect = Rect.fromLTWH(
-        seg.x * cellSize + 1,
-        seg.y * cellSize + 1,
-        cellSize - 2,
-        cellSize - 2,
-      );
-      final fillPaint = Paint()..color = isHead ? snakeColor : bodyColor;
-      final borderPaint = Paint()
-        ..color = borderColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = isHead ? 2.0 : 1.3;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(segRect, const Radius.circular(3)),
-        fillPaint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(segRect.inflate(0.5), const Radius.circular(3)),
-        borderPaint,
-      );
+    // Nostril dots
+    final nostrilPaint = Paint()..color = Colors.black.withAlpha(200);
+    canvas.drawCircle(Offset(headR * 0.72, -r * 0.24), r * 0.11, nostrilPaint);
+    canvas.drawCircle(Offset(headR * 0.72, r * 0.24), r * 0.11, nostrilPaint);
+
+    canvas.restore();
+
+    // Eyes (world space so they rotate with direction correctly)
+    final eyeCenter1 = headPos + dirNorm * r * 0.45 + perpDir * r * 0.52;
+    final eyeCenter2 = headPos + dirNorm * r * 0.45 - perpDir * r * 0.52;
+    final eyeR = r * 0.27;
+    final pupilR = eyeR * 0.56;
+
+    canvas.drawCircle(eyeCenter1, eyeR, Paint()..color = Colors.white);
+    canvas.drawCircle(eyeCenter2, eyeR, Paint()..color = Colors.white);
+
+    final pupilShift = dirNorm * eyeR * 0.18;
+    canvas.drawCircle(
+        eyeCenter1 + pupilShift, pupilR, Paint()..color = Colors.black);
+    canvas.drawCircle(
+        eyeCenter2 + pupilShift, pupilR, Paint()..color = Colors.black);
+
+    // Eye shine
+    final shineOff = -dirNorm * eyeR * 0.15 - perpDir * eyeR * 0.05;
+    canvas.drawCircle(eyeCenter1 + shineOff, eyeR * 0.22,
+        Paint()..color = Colors.white.withAlpha(210));
+    canvas.drawCircle(eyeCenter2 + shineOff, eyeR * 0.22,
+        Paint()..color = Colors.white.withAlpha(210));
+
+    // Tongue (forked) — only when alive
+    if (!isGameOver) {
+      final tongueBase = headPos + dirNorm * headR * 1.05;
+      final tongueMid = tongueBase + dirNorm * r * 0.5;
+      final fork1 = tongueMid + dirNorm * r * 0.38 + perpDir * r * 0.3;
+      final fork2 = tongueMid + dirNorm * r * 0.38 - perpDir * r * 0.3;
+
+      final tonguePaint = Paint()
+        ..color = Colors.red.shade400
+        ..strokeWidth = 1.6
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+
+      canvas.drawLine(tongueBase, tongueMid, tonguePaint);
+      canvas.drawLine(tongueMid, fork1, tonguePaint);
+      canvas.drawLine(tongueMid, fork2, tonguePaint);
     }
   }
 
