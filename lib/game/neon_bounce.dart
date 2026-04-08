@@ -199,8 +199,7 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
   }
 
   void _advanceLevel() {
-    _currentLevel =
-        (_currentLevel % _totalLevels) + 1; // cycle through 1-10
+    _currentLevel = _nextLevel(_currentLevel);
     _levelNotifier.value = _currentLevel;
     _ballSpeed = (_ballSpeed + 0.6).clamp(6.0, 14.0);
     _ballPos = Offset(_screenWidth / 2, _screenHeight / 2);
@@ -208,6 +207,9 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
     _ballVel = Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
     _initBricks();
   }
+
+  // Returns the next level number, cycling from 10 back to 1.
+  static int _nextLevel(int current) => (current % _totalLevels) + 1;
 
   void _update() {
     if (_isGameOver.value || !_isStarted.value || _isPaused.value) return;
