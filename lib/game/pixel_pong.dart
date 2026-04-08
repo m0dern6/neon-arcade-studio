@@ -34,7 +34,8 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
   double _aiY = 0;
   Offset _ballPos = Offset.zero;
   Offset _ballVel = Offset.zero;
-  double _speed = 5.0;
+  double _speed = 7.0;
+  bool _lastHitByPlayer = false;
 
   final ValueNotifier<int> _score = ValueNotifier(0);
   final ValueNotifier<bool> _isGameOver = ValueNotifier(false);
@@ -62,7 +63,8 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
     _score.value = 0;
     _isGameOver.value = false;
     _isStarted.value = true;
-    _speed = 7.0; // Increased from 5.0 for better initial ball movement
+    _speed = 7.0;
+    _lastHitByPlayer = false;
     _playerY = _screenHeight / 2;
     _aiY = _screenHeight / 2;
     _ballPos = Offset(_screenWidth / 2, _screenHeight / 2);
@@ -76,9 +78,6 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
 
   void _update() {
     if (_isGameOver.value || !_isStarted.value || _isPaused.value) return;
-
-    // Increase speed gradually as score increases
-    _speed = (5.0 + _score.value * 0.2).clamp(5.0, 15.0);
 
     _ballPos += _ballVel;
 
@@ -102,6 +101,7 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
       final angle = hitOffset * (pi / 3);
       _ballVel = Offset(cos(angle).abs() * _speed, sin(angle) * _speed);
       _ballPos = Offset(playerPaddleRight + _ballSize + 1, _ballPos.dy);
+      _lastHitByPlayer = true;
     }
 
     // AI paddle (right)
@@ -115,10 +115,16 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
       final angle = hitOffset * (pi / 3);
       _ballVel = Offset(-cos(angle).abs() * _speed, sin(angle) * _speed);
       _ballPos = Offset(aiPaddleLeft - _ballSize - 1, _ballPos.dy);
+      // Score +1 for each successful back-and-forth (player hit → AI returns)
+      if (_lastHitByPlayer) {
+        _score.value += 1;
+        _speed = (7.0 + (_score.value ~/ 10) * 1.0).clamp(7.0, 17.0);
+        _lastHitByPlayer = false;
+      }
     }
 
     // AI follows the ball with slight imperfection
-    final aiSpeed = (3.5 + _score.value * 0.04).clamp(3.5, 9.0);
+    final aiSpeed = (3.5 + (_score.value ~/ 10) * 0.3).clamp(3.5, 9.0);
     if (_aiY < _ballPos.dy - 5) {
       _aiY = (_aiY + aiSpeed).clamp(
         _paddleHeight / 2,
@@ -131,9 +137,9 @@ class _PixelPongGameState extends ConsumerState<PixelPongGame>
       );
     }
 
-    // Ball passed the AI — score point
+    // Ball passed the AI — reset without scoring (AI missed)
     if (_ballPos.dx > _screenWidth) {
-      _score.value += 10;
+      _lastHitByPlayer = false;
       _resetBall(leftward: false);
     }
 

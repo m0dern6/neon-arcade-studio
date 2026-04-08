@@ -28,9 +28,9 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
   static const double _paddleHeight = 14;
   static const double _ballRadius = 8;
   static const int _brickCols = 8;
-  static const int _brickRows = 4;
   static const double _brickH = 22;
   static const double _brickOffsetY = 120;
+  static const int _totalLevels = 10;
 
   // ── Game state ────────────────────────────────────────────────────────────
   double _paddleX = 0;
@@ -38,8 +38,10 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
   Offset _ballVel = Offset.zero;
   List<List<bool>> _bricks = [];
   double _ballSpeed = 6.0;
+  int _currentLevel = 1;
 
   final ValueNotifier<int> _score = ValueNotifier(0);
+  final ValueNotifier<int> _levelNotifier = ValueNotifier(1);
   final ValueNotifier<bool> _isGameOver = ValueNotifier(false);
   final ValueNotifier<bool> _isStarted = ValueNotifier(false);
   final ValueNotifier<bool> _isPaused = ValueNotifier(false);
@@ -63,36 +65,151 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
     )..addListener(_update);
   }
 
+  // ── Level layouts (8 columns each) ───────────────────────────────────────
+  static List<bool> _row(String s) =>
+      s.split('').map((ch) => ch == '1').toList();
+
+  static List<List<bool>> _levelLayout(int level) {
+    switch (level) {
+      case 1: // Classic full rows
+        return [
+          _row('11111111'),
+          _row('11111111'),
+          _row('11111111'),
+          _row('11111111'),
+        ];
+      case 2: // Pyramid (builds from bottom)
+        return [
+          _row('00011000'),
+          _row('00111100'),
+          _row('01111110'),
+          _row('11111111'),
+          _row('01111110'),
+          _row('00111100'),
+        ];
+      case 3: // Inverted V / triangle
+        return [
+          _row('11111111'),
+          _row('01111110'),
+          _row('00111100'),
+          _row('00011000'),
+          _row('00111100'),
+          _row('01111110'),
+          _row('11111111'),
+        ];
+      case 4: // Plus / cross shape
+        return [
+          _row('00011000'),
+          _row('00011000'),
+          _row('11111111'),
+          _row('00011000'),
+          _row('00011000'),
+          _row('11111111'),
+          _row('00011000'),
+          _row('00011000'),
+        ];
+      case 5: // Checkerboard
+        return [
+          _row('10101010'),
+          _row('01010101'),
+          _row('10101010'),
+          _row('01010101'),
+          _row('10101010'),
+          _row('01010101'),
+        ];
+      case 6: // Hollow frame with inner diamond
+        return [
+          _row('11111111'),
+          _row('10000001'),
+          _row('10011001'),
+          _row('10111101'),
+          _row('10011001'),
+          _row('10000001'),
+          _row('11111111'),
+        ];
+      case 7: // Diagonal stripes
+        return [
+          _row('10000001'),
+          _row('11000011'),
+          _row('01100110'),
+          _row('00111100'),
+          _row('00111100'),
+          _row('01100110'),
+          _row('11000011'),
+          _row('10000001'),
+        ];
+      case 8: // Hourglass
+        return [
+          _row('11111111'),
+          _row('01111110'),
+          _row('00111100'),
+          _row('00011000'),
+          _row('00011000'),
+          _row('00111100'),
+          _row('01111110'),
+          _row('11111111'),
+        ];
+      case 9: // Zigzag cascade
+        return [
+          _row('11100000'),
+          _row('01110000'),
+          _row('00111000'),
+          _row('00011100'),
+          _row('00001110'),
+          _row('00000111'),
+          _row('00001110'),
+          _row('00011100'),
+          _row('00111000'),
+        ];
+      default: // Level 10+: Dense maze
+        return [
+          _row('11111111'),
+          _row('10110101'),
+          _row('11011011'),
+          _row('10101101'),
+          _row('11011011'),
+          _row('10110101'),
+          _row('11011011'),
+          _row('10101101'),
+          _row('11111111'),
+        ];
+    }
+  }
+
   void _initBricks() {
-    _bricks = List.generate(
-      _brickRows,
-      (_) => List.generate(_brickCols, (_) => true),
-    );
+    _bricks = _levelLayout(_currentLevel)
+        .map((row) => List<bool>.from(row))
+        .toList();
   }
 
   void _startGame() {
     _score.value = 0;
+    _currentLevel = 1;
+    _levelNotifier.value = 1;
     _isGameOver.value = false;
     _isStarted.value = true;
     _ballSpeed = 6.0;
     _paddleX = _screenWidth / 2;
     _ballPos = Offset(_screenWidth / 2, _screenHeight / 2);
     final angle = -pi / 2 + (Random().nextDouble() - 0.5) * 0.6;
-    _ballVel =
-        Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
+    _ballVel = Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
     _initBricks();
     AudioManager().playSfx('start.mp3');
     _controller.repeat();
   }
 
-  void _resetLevel() {
+  void _advanceLevel() {
+    _currentLevel = _nextLevel(_currentLevel);
+    _levelNotifier.value = _currentLevel;
     _ballSpeed = (_ballSpeed + 0.6).clamp(6.0, 14.0);
     _ballPos = Offset(_screenWidth / 2, _screenHeight / 2);
     final angle = -pi / 2 + (Random().nextDouble() - 0.5) * 0.6;
-    _ballVel =
-        Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
+    _ballVel = Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
     _initBricks();
   }
+
+  // Returns the next level number, cycling from 10 back to 1.
+  static int _nextLevel(int current) => (current % _totalLevels) + 1;
 
   void _update() {
     if (_isGameOver.value || !_isStarted.value || _isPaused.value) return;
@@ -122,20 +239,17 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
         _ballPos.dy <= paddleTop + _paddleHeight &&
         _ballPos.dx >= paddleLeft &&
         _ballPos.dx <= paddleLeft + _paddleWidth) {
-      final hitOffset =
-          (_ballPos.dx - _paddleX) / (_paddleWidth / 2);
+      final hitOffset = (_ballPos.dx - _paddleX) / (_paddleWidth / 2);
       final angle = -pi / 2 + hitOffset * (pi / 3);
-      _ballVel = Offset(
-          cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
-      _ballPos =
-          Offset(_ballPos.dx, paddleTop - _ballRadius - 1);
+      _ballVel = Offset(cos(angle) * _ballSpeed, sin(angle) * _ballSpeed);
+      _ballPos = Offset(_ballPos.dx, paddleTop - _ballRadius - 1);
     }
 
     // Brick collisions
     final brickW = _screenWidth / _brickCols;
     bool hitAny = false;
-    for (int row = 0; row < _brickRows && !hitAny; row++) {
-      for (int col = 0; col < _brickCols && !hitAny; col++) {
+    for (int row = 0; row < _bricks.length && !hitAny; row++) {
+      for (int col = 0; col < _bricks[row].length && !hitAny; col++) {
         if (!_bricks[row][col]) continue;
         final bLeft = col * brickW + 2;
         final bTop = _brickOffsetY + row * (_brickH + 6);
@@ -147,10 +261,8 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
           hitAny = true;
 
           // Reflect on the dominant axis
-          final closestX =
-              _ballPos.dx.clamp(bRect.left, bRect.right);
-          final closestY =
-              _ballPos.dy.clamp(bRect.top, bRect.bottom);
+          final closestX = _ballPos.dx.clamp(bRect.left, bRect.right);
+          final closestY = _ballPos.dy.clamp(bRect.top, bRect.bottom);
           final diffX = _ballPos.dx - closestX;
           final diffY = _ballPos.dy - closestY;
           if (diffX.abs() > diffY.abs()) {
@@ -162,9 +274,9 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
       }
     }
 
-    // Check all bricks cleared → next level
+    // Check all bricks cleared → advance to next level
     if (_bricks.every((row) => row.every((b) => !b))) {
-      _resetLevel();
+      _advanceLevel();
     }
 
     // Ball fell off the bottom → game over
@@ -177,14 +289,14 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
     _isGameOver.value = true;
     AudioManager().playSfx('gameover.mp3');
     _controller.stop();
-    DatabaseService(uid: widget.uid)
-        .updateScore('neon_bounce', _score.value);
+    DatabaseService(uid: widget.uid).updateScore('neon_bounce', _score.value);
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _score.dispose();
+    _levelNotifier.dispose();
     _isGameOver.dispose();
     _isStarted.dispose();
     _isPaused.dispose();
@@ -237,29 +349,51 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
                 },
               ),
 
-              // ── Score ─────────────────────────────────────────────────────
+              // ── Score + Level display ─────────────────────────────────────
               Positioned(
                 top: 60,
                 left: 0,
                 right: 0,
-                child: Center(
-                  child: ValueListenableBuilder<int>(
-                    valueListenable: _score,
-                    builder: (context, score, _) => Text(
-                      '$score',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                        shadows: [
-                          Shadow(
-                              color: Colors.deepPurpleAccent,
-                              blurRadius: 15)
-                        ],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    ValueListenableBuilder<int>(
+                      valueListenable: _score,
+                      builder: (context, score, _) => Text(
+                        '$score',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          shadows: [
+                            Shadow(
+                                color: Colors.deepPurpleAccent,
+                                blurRadius: 15)
+                          ],
+                        ),
                       ),
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                    ValueListenableBuilder<int>(
+                      valueListenable: _levelNotifier,
+                      builder: (context, level, _) => Text(
+                        'LVL $level',
+                        style: const TextStyle(
+                          color: Colors.deepPurpleAccent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          shadows: [
+                            Shadow(
+                                color: Colors.purpleAccent, blurRadius: 10)
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
@@ -303,7 +437,15 @@ class _NeonBounceGameState extends ConsumerState<NeonBounceGame>
                                         color: Colors.white, fontSize: 20),
                                   ),
                                 ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 8),
+                              if (!gameOver)
+                                const Text(
+                                  '10 unique levels — shapes change\nevery time you clear the bricks!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white60, fontSize: 13),
+                                ),
+                              const SizedBox(height: 12),
                               const Text(
                                 'Drag left/right to move the paddle.\nBreak all the neon bricks!',
                                 textAlign: TextAlign.center,
@@ -396,11 +538,17 @@ class BouncePainter extends CustomPainter {
   static const double _brickOffsetY = 120;
   static const int _brickCols = 8;
 
+  // Brick colour palette cycles per row
   static const List<Color> _brickColors = [
     Colors.redAccent,
     Colors.orangeAccent,
     Colors.yellowAccent,
     Colors.greenAccent,
+    Colors.cyanAccent,
+    Colors.blueAccent,
+    Colors.purpleAccent,
+    Colors.pinkAccent,
+    Colors.tealAccent,
   ];
 
   BouncePainter({
@@ -468,8 +616,7 @@ class BouncePainter extends CustomPainter {
         _ballRadius + 6,
         Paint()
           ..color = Colors.purpleAccent.withAlpha(80)
-          ..maskFilter =
-              const MaskFilter.blur(BlurStyle.normal, 15),
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15),
       );
     }
     final ballPaint = Paint()..color = Colors.white;
