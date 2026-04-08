@@ -65,11 +65,7 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
     _score.value = 0;
     _isGameOver.value = false;
     _isStarted.value = true;
-    _snake = [
-      const Point(10, 16),
-      const Point(9, 16),
-      const Point(8, 16),
-    ];
+    _snake = [const Point(10, 16), const Point(9, 16), const Point(8, 16)];
     _direction = const Point(1, 0);
     _nextDirection = const Point(1, 0);
     _moveInterval = 200;
@@ -82,8 +78,7 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
   void _spawnFood() {
     Point<int> candidate;
     do {
-      candidate =
-          Point(_random.nextInt(_cols), _random.nextInt(_rows));
+      candidate = Point(_random.nextInt(_cols), _random.nextInt(_rows));
     } while (_snake.contains(candidate));
     _food = candidate;
   }
@@ -132,10 +127,18 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
     final dx = details.delta.dx;
     final dy = details.delta.dy;
     if (dx.abs() > dy.abs()) {
-      _nextDirection = dx > 0 ? const Point(1, 0) : const Point(-1, 0);
+      _setDirection(dx > 0 ? const Point(1, 0) : const Point(-1, 0));
     } else {
-      _nextDirection = dy > 0 ? const Point(0, 1) : const Point(0, -1);
+      _setDirection(dy > 0 ? const Point(0, 1) : const Point(0, -1));
     }
+  }
+
+  void _setDirection(Point<int> direction) {
+    if (!_isStarted.value || _isGameOver.value || _isPaused.value) return;
+    if (direction.x + _direction.x == 0 && direction.y + _direction.y == 0) {
+      return;
+    }
+    _nextDirection = direction;
   }
 
   void _gameOver() {
@@ -173,163 +176,177 @@ class _NeonSnakeGameState extends ConsumerState<NeonSnakeGame>
             if (_isPaused.value) return;
             if (!_isStarted.value || _isGameOver.value) _startGame();
           },
-          child: Stack(
-            children: [
-              // ── Game Canvas ───────────────────────────────────────────────
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, _) {
-                  return RepaintBoundary(
-                    child: CustomPaint(
-                      painter: SnakePainter(
-                        snake: _snake,
-                        food: _food,
-                        cellSize: _cellSize,
-                        cols: _cols,
-                        rows: _rows,
-                        isGameOver: _isGameOver.value,
-                        graphicsQuality: graphicsQuality,
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).viewPadding.top,
+            ),
+            child: Stack(
+              children: [
+                // ── Game Canvas ───────────────────────────────────────────────
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    return RepaintBoundary(
+                      child: CustomPaint(
+                        painter: SnakePainter(
+                          snake: _snake,
+                          food: _food,
+                          cellSize: _cellSize,
+                          cols: _cols,
+                          rows: _rows,
+                          isGameOver: _isGameOver.value,
+                          graphicsQuality: graphicsQuality,
+                        ),
+                        size: Size.infinite,
                       ),
-                      size: Size.infinite,
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                ),
 
-              // ── Score ─────────────────────────────────────────────────────
-              Positioned(
-                top: 60,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: ValueListenableBuilder<int>(
-                    valueListenable: _score,
-                    builder: (context, score, _) => Text(
-                      '$score',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                        shadows: [
-                          Shadow(color: Colors.limeAccent, blurRadius: 15)
-                        ],
+                // ── Score ─────────────────────────────────────────────────────
+                Positioned(
+                  top: 12,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: _score,
+                      builder: (context, score, _) => Text(
+                        '$score',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          shadows: [
+                            Shadow(color: Colors.limeAccent, blurRadius: 15),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
 
-              // ── Start / Game-over overlay ─────────────────────────────────
-              ValueListenableBuilder<bool>(
-                valueListenable: _isStarted,
-                builder: (context, started, _) {
-                  return ValueListenableBuilder<bool>(
-                    valueListenable: _isGameOver,
-                    builder: (context, gameOver, _) {
-                      if (started && !gameOver) return const SizedBox.shrink();
-                      return Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(30),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withAlpha(200),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
+                // ── Start / Game-over overlay ─────────────────────────────────
+                ValueListenableBuilder<bool>(
+                  valueListenable: _isStarted,
+                  builder: (context, started, _) {
+                    return ValueListenableBuilder<bool>(
+                      valueListenable: _isGameOver,
+                      builder: (context, gameOver, _) {
+                        if (started && !gameOver)
+                          return const SizedBox.shrink();
+                        return Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(30),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withAlpha(200),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
                                 color: Colors.limeAccent.withAlpha(100),
-                                width: 2),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                gameOver ? 'GAME OVER' : 'NEON SNAKE',
-                                style: const TextStyle(
-                                  color: Colors.limeAccent,
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 2,
-                                ),
+                                width: 2,
                               ),
-                              const SizedBox(height: 10),
-                              if (gameOver)
-                                ValueListenableBuilder<int>(
-                                  valueListenable: _score,
-                                  builder: (context, score, _) => Text(
-                                    'Score: $score',
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 20),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  gameOver ? 'GAME OVER' : 'NEON SNAKE',
+                                  style: const TextStyle(
+                                    color: Colors.limeAccent,
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 2,
                                   ),
                                 ),
-                              const SizedBox(height: 20),
-                              const Text(
-                                'Swipe to steer the snake.\nEat the glowing orbs to grow!',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: Colors.white70, fontSize: 14),
-                              ),
-                              const SizedBox(height: 20),
-                              Text(
-                                gameOver ? 'TAP TO RETRY' : 'TAP TO START',
-                                style: const TextStyle(
+                                const SizedBox(height: 10),
+                                if (gameOver)
+                                  ValueListenableBuilder<int>(
+                                    valueListenable: _score,
+                                    builder: (context, score, _) => Text(
+                                      'Score: $score',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 20,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 20),
+                                const Text(
+                                  'Swipe to steer the snake.\nEat the glowing orbs to grow!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                Text(
+                                  gameOver ? 'TAP TO RETRY' : 'TAP TO START',
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 16,
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            ],
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-
-              // ── Back Button ───────────────────────────────────────────────
-              Positioned(
-                top: 50,
-                left: 20,
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new,
-                      color: Colors.white),
-                  onPressed: () {
-                    if (_isStarted.value && !_isGameOver.value) {
-                      _isPaused.value = true;
-                    } else {
-                      Navigator.pop(context);
-                    }
+                        );
+                      },
+                    );
                   },
                 ),
-              ),
 
-              // ── Pause overlay ─────────────────────────────────────────────
-              ValueListenableBuilder<bool>(
-                valueListenable: _isPaused,
-                builder: (context, paused, _) {
-                  if (!paused) return const SizedBox.shrink();
-                  return PauseOverlay(
-                    onResume: () => _isPaused.value = false,
-                    onHome: () => Navigator.pop(context),
-                    onToggleMusic: () {
-                      final enabled = !AudioManager().isMusicEnabled;
-                      AudioManager().toggleMusic(enabled);
-                      ref
-                          .read(musicEnabledProvider.notifier)
-                          .setValue(enabled);
+                // ── Back Button ───────────────────────────────────────────────
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      color: Colors.white,
+                    ),
+                    onPressed: () {
+                      if (_isStarted.value && !_isGameOver.value) {
+                        _isPaused.value = true;
+                      } else {
+                        Navigator.pop(context);
+                      }
                     },
-                    onToggleSfx: () {
-                      final enabled = !AudioManager().isSfxEnabled;
-                      AudioManager().toggleSfx(enabled);
-                      ref.read(sfxEnabledProvider.notifier).setValue(enabled);
-                    },
-                    onToggleGraphics: () =>
-                        ref.read(graphicsQualityProvider.notifier).cycle(),
-                    isMusicEnabled: ref.read(musicEnabledProvider),
-                    isSfxEnabled: ref.read(sfxEnabledProvider),
-                    graphicsQuality: graphicsQuality,
-                  );
-                },
-              ),
-            ],
+                  ),
+                ),
+
+                // ── Pause overlay ─────────────────────────────────────────────
+                ValueListenableBuilder<bool>(
+                  valueListenable: _isPaused,
+                  builder: (context, paused, _) {
+                    if (!paused) return const SizedBox.shrink();
+                    return PauseOverlay(
+                      onResume: () => _isPaused.value = false,
+                      onHome: () => Navigator.pop(context),
+                      onToggleMusic: () {
+                        final enabled = !AudioManager().isMusicEnabled;
+                        AudioManager().toggleMusic(enabled);
+                        ref
+                            .read(musicEnabledProvider.notifier)
+                            .setValue(enabled);
+                      },
+                      onToggleSfx: () {
+                        final enabled = !AudioManager().isSfxEnabled;
+                        AudioManager().toggleSfx(enabled);
+                        ref.read(sfxEnabledProvider.notifier).setValue(enabled);
+                      },
+                      onToggleGraphics: () =>
+                          ref.read(graphicsQualityProvider.notifier).cycle(),
+                      isMusicEnabled: ref.read(musicEnabledProvider),
+                      isSfxEnabled: ref.read(sfxEnabledProvider),
+                      graphicsQuality: graphicsQuality,
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -358,58 +375,51 @@ class SnakePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Grid
-    final gridPaint = Paint()
-      ..color = Colors.white.withAlpha(8)
-      ..strokeWidth = 0.5;
-    for (int c = 0; c <= cols; c++) {
-      canvas.drawLine(
-          Offset(c * cellSize, 0), Offset(c * cellSize, rows * cellSize),
-          gridPaint);
-    }
-    for (int r = 0; r <= rows; r++) {
-      canvas.drawLine(
-          Offset(0, r * cellSize), Offset(cols * cellSize, r * cellSize),
-          gridPaint);
-    }
+    // Crisp neon shapes with no blur so the snake stays sharp.
+    final snakeColor = isGameOver ? Colors.redAccent : Colors.cyanAccent;
+    final bodyColor = Colors.greenAccent;
+    final borderColor = isGameOver ? Colors.orangeAccent : Colors.limeAccent;
 
-    // Food
-    final foodPaint = Paint()..color = Colors.redAccent;
-    if (graphicsQuality != GraphicsQuality.low) {
-      foodPaint.maskFilter = MaskFilter.blur(
-          BlurStyle.normal,
-          graphicsQuality == GraphicsQuality.high ? 10 : 5);
-    }
-    canvas.drawCircle(
-      Offset((food.x + 0.5) * cellSize, (food.y + 0.5) * cellSize),
-      cellSize * 0.4,
-      foodPaint,
+    final foodRect = Rect.fromCenter(
+      center: Offset((food.x + 0.5) * cellSize, (food.y + 0.5) * cellSize),
+      width: cellSize * 0.55,
+      height: cellSize * 0.55,
+    );
+    final foodFill = Paint()..color = Colors.pinkAccent;
+    final foodStroke = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(foodRect, const Radius.circular(4)),
+      foodFill,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(foodRect.inflate(1.5), const Radius.circular(5)),
+      foodStroke,
     );
 
-    // Snake segments
-    final snakeColor = isGameOver ? Colors.red : Colors.limeAccent;
     for (int i = 0; i < snake.length; i++) {
       final seg = snake[i];
-      final alpha =
-          (255 * (1.0 - i / snake.length * 0.5).clamp(0.5, 1.0)).round();
-      final segPaint = Paint()
-        ..color = snakeColor.withAlpha(alpha);
-      if (graphicsQuality != GraphicsQuality.low && i == 0) {
-        segPaint.maskFilter = MaskFilter.blur(
-            BlurStyle.normal,
-            graphicsQuality == GraphicsQuality.high ? 8 : 4);
-      }
+      final isHead = i == 0;
+      final segRect = Rect.fromLTWH(
+        seg.x * cellSize + 1,
+        seg.y * cellSize + 1,
+        cellSize - 2,
+        cellSize - 2,
+      );
+      final fillPaint = Paint()..color = isHead ? snakeColor : bodyColor;
+      final borderPaint = Paint()
+        ..color = borderColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isHead ? 2.0 : 1.3;
       canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            seg.x * cellSize + 1,
-            seg.y * cellSize + 1,
-            cellSize - 2,
-            cellSize - 2,
-          ),
-          const Radius.circular(3),
-        ),
-        segPaint,
+        RRect.fromRectAndRadius(segRect, const Radius.circular(3)),
+        fillPaint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(segRect.inflate(0.5), const Radius.circular(3)),
+        borderPaint,
       );
     }
   }
